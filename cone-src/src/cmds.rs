@@ -707,6 +707,8 @@ pub fn cmd_help() {
     println!("                        pick ping   先测延迟再按快慢排序选择");
     println!();
     println!("  {}use{} <关键字>        直接切换节点，支持模糊匹配", c.green, c.reset);
+    println!("  {}start{}               启动 mihomo 服务 (需 sudo)", c.green, c.reset);
+    println!("  {}stop{}                停止 mihomo 服务 (需 sudo)", c.green, c.reset);
     println!("  {}update{} [URL]        拉取订阅生成 config.yaml 并自动重载", c.green, c.reset);
     println!("  {}service{} <act>       控制 mihomo 服务 {{on|off|restart|status}}", c.green, c.reset);
     println!("  {}tun{} <act>           控制 TUN {{on|off|status}}", c.green, c.reset);

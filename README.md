@@ -75,6 +75,8 @@ mihomo 下载完成后，如果是交互式终端且系统有 systemd，会询�
 | `cone-cli best [关键字] [-n N]` | 自动选最快并切换（会改变当前节点！），默认 5 候选；可加关键字过滤 |
 | `cone-cli pick [ping]` | fzf 交互式选节点（`pick ping` 先测延迟排序） |
 | `cone-cli use <关键字>` | 直接切换节点，支持模糊匹配 |
+| `cone-cli start` | 启动 mihomo 服务（需 sudo，等同 `service on`） |
+| `cone-cli stop` | 停止 mihomo 服务（需 sudo，等同 `service off`） |
 | `cone-cli update [URL]` | 拉取订阅生成 config.yaml 并自动重载 |
 | `cone-cli service <act>` | 控制 mihomo 服务（on/off/restart/status，需 sudo） |
 | `cone-cli tun <act>` | 控制 TUN 全局透明代理（on/off/status） |

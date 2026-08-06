@@ -61,6 +61,10 @@ enum Cmd {
     /// 直接切换节点，支持模糊匹配
     #[command(alias = "select", alias = "switch")]
     Use { name: String },
+    /// 启动 mihomo 服务 (等同 service on, 需 sudo)
+    Start,
+    /// 停止 mihomo 服务 (等同 service off, 需 sudo)
+    Stop,
     /// 拉取订阅生成 config.yaml 并自动重载
     #[command(alias = "sub")]
     Update { url: Option<String> },
@@ -133,6 +137,8 @@ fn main() {
             rt.block_on(cmds::cmd_pick(&client, do_ping));
         }
         Cmd::Use { name } => rt.block_on(cmds::cmd_select(&client, &name)),
+        Cmd::Start => cmds::cmd_service(&cfg, "start"),
+        Cmd::Stop => cmds::cmd_service(&cfg, "stop"),
         Cmd::Update { url } => rt.block_on(cmds::cmd_update(&client, &cfg, url.as_deref())),
         Cmd::Service { act } => cmds::cmd_service(&cfg, &act),
         Cmd::Tun { act } => rt.block_on(cmds::cmd_tun(&client, &cfg, &act)),
