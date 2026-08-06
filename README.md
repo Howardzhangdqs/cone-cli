@@ -1,0 +1,174 @@
+# Cone CLI
+
+> Mihomo (Clash.Meta) 的命令行测速与节点选择工具，用 Rust 编写。
+
+普通 Clash 客户端依赖 GUI，无法便捷的进行二次开发，也无法使用命令行操作。
+
+`cone-cli` 通过 mihomo 的 RESTful API 测节点延迟与带宽，并提供节点切换、订阅更新、服务控制等功能。相比传统 shell 脚本，它带来**真并发延迟测试**、**实时进度条**、**精确对齐的表格输出**（正确处理中文/emoji/ANSI 颜色码），以及单二进制零依赖部署。
+
+![status 示例](https://img.shields.io/badge/platform-linux%20x86__64%20%7C%20arm64-blue)
+![rust](https://img.shields.io/badge/Rust-1.75%2B-orange)
+
+## 特性
+
+- **11 个子命令**：status / list / ping / speed / best / pick / use / update / service / tun / help
+- **真并发延迟测试**：基于 tokio，所有节点全并发测延迟，测好即显示（不等全部完成）
+- **实时吞吐测速**：下载过程进度条实时刷新（速率 + 已下载量 + 用时），测完后定格保留
+- **详细测速报告**：平均速度、峰值速度、warmup 耗时、TTFB、下载量、总耗时，按平均速度排序
+- **精确表格对齐**：自研 unicode-width 渲染器，中文（2 列宽）、emoji 国旗、ANSI 颜色码混排也整齐
+- **自动安装 mihomo 核心**：首次运行检测到无 mihomo 二进制时，自动从 GitHub 下载最新 compatible 版（支持镜像站回退 + 进度条）
+- **单二进制**：rustls 静态链接，无 OpenSSL 依赖，编译后一个文件搞定
+
+## 快速开始
+
+### 安装
+
+```bash
+# 1. 克隆仓库
+git clone https://github.com/Howardzhangdqs/cone-cli.git
+cd cone-cli
+
+# 2. 编译 (需 Rust 1.75+)
+cd cone-src
+cargo build --release
+cp target/release/cone-cli ..
+cd ..
+
+# 3. 首次运行 —— 会自动下载 mihomo 核心
+./cone-cli status
+```
+
+如果你已有 mihomo 二进制，把它放到 `cone-cli` 同级目录即可，跳过自动下载。
+
+### mihomo 自动下载
+
+首次运行时，如果 `cone-cli` 同级目录没有 `mihomo` 二进制，会自动：
+
+1. 查询 [MetaCubeX/mihomo](https://github.com/MetaCubeX/mihomo) 最新 release
+2. 下载对应架构的 `compatible` 变体（amd64 / arm64 自动检测）
+3. GitHub 失败时依次尝试镜像站（ghproxy / ghfast / gh-proxy）
+4. 下载过程显示进度条，解压后赋可执行权限
+
+### systemd 服务引导安装
+
+mihomo 下载完成后，如果是交互式终端且系统有 systemd，会询问是否安装 `mihomo@.service`：
+
+```
+是否安装 systemd 服务?
+  安装后可用 `cone-cli service on/off/restart` 管理 mihomo,
+  并支持 TUN 全局透明代理 (需 cap_net_admin)。安装需要 sudo。
+  安装? [Y/n]
+```
+
+输入 `Y` 或直接回车即用 sudo 安装到 `/etc/systemd/system/` 并 daemon-reload；之后即可用 `cone-cli service on` 启动。输 `n` 跳过，之后可手动 `sudo cp mihomo@.service /etc/systemd/system/`。
+
+## 命令一览
+
+建议设置别名 `alias mc=cone-cli`，下文用 `mc` 示例。
+
+| 命令 | 说明 |
+|------|------|
+| `mc status` | 显示版本 / API / 端口 / 主选择器 / 当前节点 / 节点总数 |
+| `mc list` | 列出全部节点（带类型，标记当前节点） |
+| `mc ping [N]` | 并行测全部节点延迟，显示前 N（默认 15），失败标 FAIL |
+| `mc speed [N]` | 吞吐测速（只读，测完恢复原节点），默认 5 候选 |
+| `mc best [N]` | 自动选最快并切换（会改变当前节点！），默认 5 候选 |
+| `mc pick [ping]` | fzf 交互式选节点（`pick ping` 先测延迟排序） |
+| `mc use <关键字>` | 直接切换节点，支持模糊匹配 |
+| `mc update [URL]` | 拉取订阅生成 config.yaml 并自动重载 |
+| `mc service <act>` | 控制 mihomo 服务（on/off/restart/status，需 sudo） |
+| `mc tun <act>` | 控制 TUN 全局透明代理（on/off/status） |
+| `mc help` | 显示帮助 |
+
+### 环境变量（可选）
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `MIHOMO_API` | `http://127.0.0.1:9090` | mihomo 控制 API |
+| `MIHOMO_PROXY` | `http://127.0.0.1:7890` | 代理地址（用于吞吐测速） |
+| `MIHOMO_GROUP` | 自动探测 | 指定选择器组名 |
+| `MIHOMO_TEST_URL` | `gstatic.com/generate_204` | 延迟测试 URL |
+| `MIHOMO_SPEED_URL` | `speed.cloudflare.com/__down` | 吞吐下载 URL |
+| `MIHOMO_SPEED_BYTES` | `10000000` | 吞吐下载字节数 |
+| `MIHOMO_DELAY_TIMEOUT` | `5000` | 延迟超时（ms） |
+| `MIHOMO_PARALLEL` | `15` | 延迟并发数 |
+| `MIHOMO_CONF_DIR` | `~/.config/mihomo` | 配置目录 |
+| `MIHOMO_SUB_URL` | （读取已保存文件） | 订阅地址 |
+| `MIHOMO_SUB_UA` | `clash.meta` | 拉取订阅用的 UA |
+
+## 使用示例
+
+```bash
+mc                          # 显示帮助
+mc status                   # 看当前用哪个节点
+mc ping                     # 看延迟前 15（流式输出，测好即显示）
+mc ping 30                  # 看前 30
+mc speed                    # 吞吐测速前 5 候选（详细报告 + 实时进度条）
+mc best                     # 一键选最快并切换
+mc best 3                   # 只比前 3，最快出结果
+mc pick                     # fzf 即时选节点
+mc pick ping                # 边看延迟边选
+mc use 日本                 # 切到日本节点（模糊匹配）
+mc update                   # 更新订阅（首次需 mc update <URL>）
+mc service status           # 查看 mihomo 服务状态
+mc tun on                   # 开启 TUN 全局透明代理
+```
+
+## 测速原理
+
+**为什么 `best`/`speed` 要先用延迟筛 N 个候选？**
+
+吞吐测速一次只能测一个节点（共享同一选择器，串行切换），全测很慢。而延迟与带宽高度相关，前 8~10 名几乎必含真正最快的。因此采用：
+
+1. **延迟筛选**：全并发测延迟，取 Top N（默认 5）作为候选
+2. **吞吐精筛**：逐个切换候选节点，串行下载实测带宽（warmup → 流式下载 → 记录平均/峰值/TTFB 等）
+
+**测速报告字段**：
+
+| 字段 | 含义 |
+|------|------|
+| 平均速度 | 总下载量 ÷ 总耗时 |
+| 峰值速度 | 100ms 采样的瞬时速率最大值 |
+| warmup | warmup 请求总耗时（TCP+TLS 握手 + 首请求） |
+| TTFB | 首字节时间（发起请求到第一个 chunk 到达） |
+| 下载量 | 实际下载字节数 |
+| 耗时 | 实测下载总耗时 |
+| 延迟 | mihomo API 返回的延迟（ms） |
+
+## 项目结构
+
+```
+.
+├── cone-cli              # 编译产物（单二进制）
+├── cone-src/             # Rust 源码
+│   ├── src/
+│   │   ├── main.rs       # 入口：clap 分发 + mihomo 自动下载
+│   │   ├── api.rs        # mihomo RESTful 客户端（节点过滤/组操作/延迟）
+│   │   ├── measure.rs    # 延迟并发 + 流式吞吐测速（SpeedDetail）
+│   │   ├── ui.rs         # 颜色 / delay_tag / 表格渲染（unicode-width）
+│   │   ├── cmds.rs       # 全部子命令实现
+│   │   └── mihomo_setup.rs # mihomo 核心自动下载 + service 引导安装
+│   └── Cargo.toml
+└── mihomo@.service       # systemd 模板服务（TUN 需要 cap_net_admin）
+```
+
+## 技术栈
+
+- **Rust** + **tokio**：异步并发（延迟测试全并发，吞吐串行）
+- **reqwest**（rustls 后端）：无 OpenSSL 依赖，二进制可移植
+- **indicatif**：测速进度条（延迟 spinner + 吞吐实时速率）
+- **unicode-width**：自研表格渲染器，精确处理 CJK / emoji / ANSI 宽度
+
+## 从 bash 版迁移
+
+本项目最初由一个 589 行的 bash 脚本演化而来，现已完全用 Rust 重写。相比原始 bash 版，Rust 版带来：
+
+- 真并发延迟测试（bash 用 fork + 文件轮询模拟）
+- 吞吐测速实时进度条（bash 测完才显示）
+- 详细测速报告（峰值 / TTFB / warmup 等）
+- mihomo 核心自动下载 + systemd 服务引导
+- 精确的中文/emoji 表格对齐
+
+## 许可
+
+MIT
