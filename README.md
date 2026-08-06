@@ -64,21 +64,21 @@ mihomo 下载完成后，如果是交互式终端且系统有 systemd，会询�
 
 ## 命令一览
 
-建议设置别名 `alias mc=cone-cli`，下文用 `mc` 示例。
+下文示例均使用 `cone-cli` 全名（如嫌长可自行设置别名）。
 
 | 命令 | 说明 |
 |------|------|
-| `mc status` | 显示版本 / API / 端口 / 主选择器 / 当前节点 / 节点总数 |
-| `mc list` | 列出全部节点（带类型，标记当前节点） |
-| `mc ping [N]` | 并行测全部节点延迟，显示前 N（默认 15），失败标 FAIL |
-| `mc speed [N]` | 吞吐测速（只读，测完恢复原节点），默认 5 候选 |
-| `mc best [N]` | 自动选最快并切换（会改变当前节点！），默认 5 候选 |
-| `mc pick [ping]` | fzf 交互式选节点（`pick ping` 先测延迟排序） |
-| `mc use <关键字>` | 直接切换节点，支持模糊匹配 |
-| `mc update [URL]` | 拉取订阅生成 config.yaml 并自动重载 |
-| `mc service <act>` | 控制 mihomo 服务（on/off/restart/status，需 sudo） |
-| `mc tun <act>` | 控制 TUN 全局透明代理（on/off/status） |
-| `mc help` | 显示帮助 |
+| `cone-cli status` | 显示版本 / API / 端口 / 主选择器 / 当前节点 / 节点总数 |
+| `cone-cli list` | 列出全部节点（带类型，标记当前节点） |
+| `cone-cli ping [N]` | 并行测全部节点延迟，显示前 N（默认 15），失败标 FAIL |
+| `cone-cli speed [N]` | 吞吐测速（只读，测完恢复原节点），默认 5 候选 |
+| `cone-cli best [N]` | 自动选最快并切换（会改变当前节点！），默认 5 候选 |
+| `cone-cli pick [ping]` | fzf 交互式选节点（`pick ping` 先测延迟排序） |
+| `cone-cli use <关键字>` | 直接切换节点，支持模糊匹配 |
+| `cone-cli update [URL]` | 拉取订阅生成 config.yaml 并自动重载 |
+| `cone-cli service <act>` | 控制 mihomo 服务（on/off/restart/status，需 sudo） |
+| `cone-cli tun <act>` | 控制 TUN 全局透明代理（on/off/status） |
+| `cone-cli help` | 显示帮助 |
 
 ### 环境变量（可选）
 
@@ -99,19 +99,19 @@ mihomo 下载完成后，如果是交互式终端且系统有 systemd，会询�
 ## 使用示例
 
 ```bash
-mc                          # 显示帮助
-mc status                   # 看当前用哪个节点
-mc ping                     # 看延迟前 15（流式输出，测好即显示）
-mc ping 30                  # 看前 30
-mc speed                    # 吞吐测速前 5 候选（详细报告 + 实时进度条）
-mc best                     # 一键选最快并切换
-mc best 3                   # 只比前 3，最快出结果
-mc pick                     # fzf 即时选节点
-mc pick ping                # 边看延迟边选
-mc use 日本                 # 切到日本节点（模糊匹配）
-mc update                   # 更新订阅（首次需 mc update <URL>）
-mc service status           # 查看 mihomo 服务状态
-mc tun on                   # 开启 TUN 全局透明代理
+cone-cli                          # 显示帮助
+cone-cli status                   # 看当前用哪个节点
+cone-cli ping                     # 看延迟前 15（流式输出，测好即显示）
+cone-cli ping 30                  # 看前 30
+cone-cli speed                    # 吞吐测速前 5 候选（详细报告 + 实时进度条）
+cone-cli best                     # 一键选最快并切换
+cone-cli best 3                   # 只比前 3，最快出结果
+cone-cli pick                     # fzf 即时选节点
+cone-cli pick ping                # 边看延迟边选
+cone-cli use 日本                 # 切到日本节点（模糊匹配）
+cone-cli update                   # 更新订阅（首次需 cone-cli update <URL>）
+cone-cli service status           # 查看 mihomo 服务状态
+cone-cli tun on                   # 开启 TUN 全局透明代理
 ```
 
 ## 测速原理

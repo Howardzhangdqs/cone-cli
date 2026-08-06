@@ -663,7 +663,7 @@ fn flip_tun_in_config(cfg: &Config, enable: bool) -> std::io::Result<()> {
 pub fn cmd_help() {
     let c = pick_colors();
     println!("{}{}cone-cli{}  —  Mihomo (Clash.Meta) 测速与节点选择工具 (Rust 版){}", c.magenta, c.bold, c.reset, c.reset);
-    println!("{}(建议别名 mc，下文示例用 mc 表示本命令){}\n", c.dim, c.reset);
+    println!("{}(如嫌命令长可自行设置别名){}\n", c.dim, c.reset);
     println!("{}【命令】{}", c.bold, c.reset);
     println!("  {}status{}              显示版本/API/端口/主选择器/当前节点/节点总数", c.green, c.reset);
     println!("  {}list{}                列出全部节点 (带类型，标记当前节点)", c.green, c.reset);
