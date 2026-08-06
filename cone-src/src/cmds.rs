@@ -65,11 +65,21 @@ pub async fn cmd_list(client: &Client) {
 }
 
 // ============================== ping ==============================
-pub async fn cmd_ping(client: &Client, n: usize) {
+pub async fn cmd_ping(client: &Client, n: usize, filter: Option<&str>) {
     let c = pick_colors();
-    let nodes = client.get_nodes().await.unwrap_or_else(|e| die(&e));
+    let mut nodes = client.get_nodes().await.unwrap_or_else(|e| die(&e));
+    // 关键字过滤 (大小写不敏感包含匹配)
+    if let Some(kw) = filter {
+        let kw_lc = kw.to_lowercase();
+        nodes.retain(|name| name.to_lowercase().contains(&kw_lc));
+        if nodes.is_empty() {
+            die(&format!("未找到匹配「{}」的节点", kw));
+        }
+        println!("{}▶ 延迟测试 (过滤: {}, 共 {} 个, 并发 {})...{}", c.dim, kw, nodes.len(), client.cfg.parallel, c.reset);
+    } else {
+        println!("{}▶ 延迟测试中 (并发 {}, 即时显示)...{}", c.dim, client.cfg.parallel, c.reset);
+    }
     let total = nodes.len();
-    println!("{}▶ 延迟测试中 (并发 {}, 即时显示)...{}", c.dim, client.cfg.parallel, c.reset);
 
     // spinner 计数 + 流式结果: 用 pb.println 把结果行打印到 spinner 上方, 避免抢占
     let spinner = ProgressBar::new(total as u64);
@@ -122,9 +132,20 @@ pub async fn cmd_ping(client: &Client, n: usize) {
 
 // ============================== speed / best 共享流程 ==============================
 /// 延迟筛 Top N 候选 + 流式显示 (best/speed 共用)
-async fn pick_candidates(client: &Client, n: usize) -> Vec<String> {
+/// filter: 可选关键字过滤 (大小写不敏感包含匹配)
+async fn pick_candidates(client: &Client, n: usize, filter: Option<&str>) -> Vec<String> {
     let c = pick_colors();
-    let nodes = client.get_nodes().await.unwrap_or_else(|e| die(&e));
+    let mut nodes = client.get_nodes().await.unwrap_or_else(|e| die(&e));
+    if let Some(kw) = filter {
+        let kw_lc = kw.to_lowercase();
+        nodes.retain(|name| name.to_lowercase().contains(&kw_lc));
+        if nodes.is_empty() {
+            die(&format!("未找到匹配「{}」的节点", kw));
+        }
+        println!("{}1. 延迟筛选 Top {} 候选 (过滤: {}, 共 {} 个)...{}", c.dim, n, kw, nodes.len(), c.reset);
+    } else {
+        println!("{}1. 延迟筛选 Top {} 候选 (即时显示)...{}", c.dim, n, c.reset);
+    }
     println!("{}1. 延迟筛选 Top {} 候选 (即时显示)...{}", c.dim, n, c.reset);
     let total = nodes.len();
     let spinner = ProgressBar::new(total as u64);
@@ -248,10 +269,10 @@ fn render_detail_table(c: &Colors, results: &[(String, SpeedDetail, String)]) ->
     )
 }
 
-pub async fn cmd_speed(client: &Client, n: usize) {
+pub async fn cmd_speed(client: &Client, n: usize, filter: Option<&str>) {
     let c = pick_colors();
     let orig = client.group_now().await.unwrap_or_else(|e| die(&e));
-    let cands = pick_candidates(client, n).await;
+    let cands = pick_candidates(client, n, filter).await;
     if cands.is_empty() {
         die("无可用节点");
     }
@@ -272,10 +293,10 @@ pub async fn cmd_speed(client: &Client, n: usize) {
     println!("{}(已恢复原节点: {}){}", c.dim, orig, c.reset);
 }
 
-pub async fn cmd_best(client: &Client, n: usize) {
+pub async fn cmd_best(client: &Client, n: usize, filter: Option<&str>) {
     let c = pick_colors();
     // best 测完会切换到最快节点, 不需要保存/恢复原节点 (区别于 speed)
-    let cands = pick_candidates(client, n).await;
+    let cands = pick_candidates(client, n, filter).await;
     if cands.is_empty() {
         die("无可用节点");
     }
@@ -668,16 +689,18 @@ pub fn cmd_help() {
     println!("  {}status{}              显示版本/API/端口/主选择器/当前节点/节点总数", c.green, c.reset);
     println!("  {}list{}                列出全部节点 (带类型，标记当前节点)", c.green, c.reset);
     println!();
-    println!("  {}ping{} [N]            并行测全部节点延迟，按快慢显示前 N (默认 15)", c.green, c.reset);
-    println!("                      只读，不改任何东西；失败节点标 FAIL");
+    println!("  {}ping{} [关键字] [-n N]  并行测延迟，按快慢显示前 N (默认 15)", c.green, c.reset);
+    println!("                      只读；失败节点标 FAIL");
+    println!("                      可加关键字过滤: ping 香港 / ping 美国 -n 10");
     println!();
-    println!("  {}speed{} [N]           吞吐测速 (只读，测完恢复原节点):", c.green, c.reset);
-    println!("                        1. 并行测延迟 → 取前 N (默认 8)");
+    println!("  {}speed{} [关键字] [-n N] 吞吐测速 (只读，测完恢复原节点):", c.green, c.reset);
+    println!("                        1. 并行测延迟 → 取前 N (默认 5)");
     println!("                        2. 逐个切换并下载实测带宽 (Mbps)，实时进度条");
+    println!("                      可加关键字过滤: speed 日本 -n 10");
     println!();
-    println!("  {}best{} [N]            自动选最快并切换 (会改变当前节点!):", c.green, c.reset);
+    println!("  {}best{} [关键字] [-n N]  自动选最快并切换 (会改变当前节点!):", c.green, c.reset);
     println!("                      流程同 speed，但测完把当前节点设为带宽最高者");
-    println!("                      N=候选数，默认 8；best 3 最快，best 20 更稳");
+    println!("                      N=候选数，默认 5；可加关键字过滤: best 香港 -n 3");
     println!();
     println!("  {}pick{} [ping]         fzf 交互式选节点:", c.green, c.reset);
     println!("                        pick        即时列出节点名，回车切换");

@@ -23,14 +23,35 @@ enum Cmd {
     #[command(alias = "ls")]
     List,
     /// 并行测全部节点延迟，按快慢显示前 N (默认 15)
+    /// 可加关键字过滤，如: cone-cli ping 美国 / cone-cli ping 美国 -n 30
     #[command(alias = "latency")]
-    Ping { n: Option<usize> },
+    Ping {
+        /// 节点名过滤关键字 (可选，大小写不敏感包含匹配)
+        filter: Option<String>,
+        /// 显示前 N 名 (默认 15)
+        #[arg(short = 'n', long = "num")]
+        n: Option<usize>,
+    },
     /// 吞吐测速 (只读，测完恢复原节点)
+    /// 可加关键字过滤，如: cone-cli speed 日本 -n 10
     #[command(alias = "throughput")]
-    Speed { n: Option<usize> },
+    Speed {
+        /// 节点名过滤关键字 (可选)
+        filter: Option<String>,
+        /// 候选数 (默认 5)
+        #[arg(short = 'n', long = "num")]
+        n: Option<usize>,
+    },
     /// 自动选最快并切换
+    /// 可加关键字过滤，如: cone-cli best 香港 -n 3
     #[command(alias = "fastest")]
-    Best { n: Option<usize> },
+    Best {
+        /// 节点名过滤关键字 (可选)
+        filter: Option<String>,
+        /// 候选数 (默认 5)
+        #[arg(short = 'n', long = "num")]
+        n: Option<usize>,
+    },
     /// fzf 交互式选节点
     #[command(alias = "menu", alias = "fzf")]
     Pick {
@@ -104,9 +125,9 @@ fn main() {
     match cmd {
         Cmd::Status => rt.block_on(cmds::cmd_status(&client)),
         Cmd::List => rt.block_on(cmds::cmd_list(&client)),
-        Cmd::Ping { n } => rt.block_on(cmds::cmd_ping(&client, n.unwrap_or(15))),
-        Cmd::Speed { n } => rt.block_on(cmds::cmd_speed(&client, n.unwrap_or(5))),
-        Cmd::Best { n } => rt.block_on(cmds::cmd_best(&client, n.unwrap_or(5))),
+        Cmd::Ping { filter, n } => rt.block_on(cmds::cmd_ping(&client, n.unwrap_or(15), filter.as_deref())),
+        Cmd::Speed { filter, n } => rt.block_on(cmds::cmd_speed(&client, n.unwrap_or(5), filter.as_deref())),
+        Cmd::Best { filter, n } => rt.block_on(cmds::cmd_best(&client, n.unwrap_or(5), filter.as_deref())),
         Cmd::Pick { mode } => {
             let do_ping = matches!(mode.as_str(), "ping" | "-p" | "--ping");
             rt.block_on(cmds::cmd_pick(&client, do_ping));

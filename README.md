@@ -70,9 +70,9 @@ mihomo 下载完成后，如果是交互式终端且系统有 systemd，会询�
 |------|------|
 | `cone-cli status` | 显示版本 / API / 端口 / 主选择器 / 当前节点 / 节点总数 |
 | `cone-cli list` | 列出全部节点（带类型，标记当前节点） |
-| `cone-cli ping [N]` | 并行测全部节点延迟，显示前 N（默认 15），失败标 FAIL |
-| `cone-cli speed [N]` | 吞吐测速（只读，测完恢复原节点），默认 5 候选 |
-| `cone-cli best [N]` | 自动选最快并切换（会改变当前节点！），默认 5 候选 |
+| `cone-cli ping [关键字] [-n N]` | 并行测延迟，显示前 N（默认 15）；可加关键字过滤，如 `ping 香港 -n 10` |
+| `cone-cli speed [关键字] [-n N]` | 吞吐测速（只读，测完恢复原节点），默认 5 候选；可加关键字过滤 |
+| `cone-cli best [关键字] [-n N]` | 自动选最快并切换（会改变当前节点！），默认 5 候选；可加关键字过滤 |
 | `cone-cli pick [ping]` | fzf 交互式选节点（`pick ping` 先测延迟排序） |
 | `cone-cli use <关键字>` | 直接切换节点，支持模糊匹配 |
 | `cone-cli update [URL]` | 拉取订阅生成 config.yaml 并自动重载 |
@@ -103,9 +103,13 @@ cone-cli                          # 显示帮助
 cone-cli status                   # 看当前用哪个节点
 cone-cli ping                     # 看延迟前 15（流式输出，测好即显示）
 cone-cli ping 30                  # 看前 30
+cone-cli ping 香港                # 只看名字含「香港」的节点延迟
+cone-cli ping 美国 -n 10          # 美国节点，前 10
 cone-cli speed                    # 吞吐测速前 5 候选（详细报告 + 实时进度条）
+cone-cli speed 日本 -n 10         # 日本节点，前 10 测速
 cone-cli best                     # 一键选最快并切换
 cone-cli best 3                   # 只比前 3，最快出结果
+cone-cli best 香港 -n 3           # 在香港节点里选最快
 cone-cli pick                     # fzf 即时选节点
 cone-cli pick ping                # 边看延迟边选
 cone-cli use 日本                 # 切到日本节点（模糊匹配）
