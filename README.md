@@ -118,6 +118,50 @@ cone-cli service status           # 查看 mihomo 服务状态
 cone-cli tun on                   # 开启 TUN 全局透明代理
 ```
 
+## 演示
+
+`best` 命令的两阶段输出（节点名已脱敏为占位）：先并发测延迟生成**热力砖块墙**（颜色按延迟分档：绿<200ms · 青<500ms · 黄<1000ms · 红≥1000ms · 暗血红失败），再对 Top N 候选逐个下载测速，每 1MB 区间一块**速度砖块**（显示该区间 Mbps，颜色按速度分档），最后输出汇总表格并切换到最快节点。
+
+<details>
+<summary>点击展开 <code>cone-cli best</code> 完整输出演示</summary>
+
+<pre><font color="#AAAAAA">1. 延迟筛选 Top 5 候选 (即时显示)...</font>
+⠏ 52/52 测延迟中  ██████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████
+<span style="background-color:#005F00"><font color="#FFFFFF"> 🏳️ 节点01…   36ms </font></span> <span style="background-color:#005F00"><font color="#FFFFFF"> 🏳️ 节点02…   39ms </font></span> <span style="background-color:#005F00"><font color="#FFFFFF"> 🏳️ 节点03…   32ms </font></span> <span style="background-color:#005F00"><font color="#FFFFFF"> 🏳️ 节点04…   29ms </font></span> <span style="background-color:#005F00"><font color="#FFFFFF"> 🏳️ 节点05…   32ms </font></span> <span style="background-color:#005F00"><font color="#FFFFFF"> 🏳️ 节点06…   35ms </font></span>
+<span style="background-color:#005F00"><font color="#FFFFFF"> 🏳️ 节点07…   36ms </font></span> <span style="background-color:#005F00"><font color="#FFFFFF"> 🏳️ 节点08…  178ms </font></span> <span style="background-color:#005F00"><font color="#FFFFFF"> 🏳️ 节点09…  181ms </font></span> <span style="background-color:#005F00"><font color="#FFFFFF"> 🏳️ 节点10…  184ms </font></span> <span style="background-color:#005F00"><font color="#FFFFFF"> 🏳️ 节点11…   31ms </font></span> <span style="background-color:#005F00"><font color="#FFFFFF"> 🏳️ 节点12…  178ms </font></span>
+<span style="background-color:#005F00"><font color="#FFFFFF"> 🏳️ 节点13…  164ms </font></span> <span style="background-color:#005F87"><font color="#FFFFFF"> 🏳️ 节点14…  239ms </font></span> <span style="background-color:#005F87"><font color="#FFFFFF"> 🏳️ 节点15…  234ms </font></span> <span style="background-color:#005F00"><font color="#FFFFFF"> 🏳️ 节点16…   76ms </font></span> <span style="background-color:#005F87"><font color="#FFFFFF"> 🏳️ 节点17…  252ms </font></span> <span style="background-color:#005F87"><font color="#FFFFFF"> 🏳️ 节点18…  272ms </font></span>
+<span style="background-color:#005F00"><font color="#FFFFFF"> 🏳️ 节点19…   75ms </font></span> <span style="background-color:#005F87"><font color="#FFFFFF"> 🏳️ 节点20…  287ms </font></span> <span style="background-color:#005F87"><font color="#FFFFFF"> 🏳️ 节点21…  291ms </font></span> <span style="background-color:#005F00"><font color="#FFFFFF"> 🏳️ 节点22…  117ms </font></span> <span style="background-color:#005F00"><font color="#FFFFFF"> 🏳️ 节点23…  140ms </font></span> <span style="background-color:#005F00"><font color="#FFFFFF"> 🏳️ 节点24…   79ms </font></span>
+<span style="background-color:#005F00"><font color="#FFFFFF"> 🏳️ 节点25…   82ms </font></span> <span style="background-color:#005F00"><font color="#FFFFFF"> 🏳️ 节点26…   54ms </font></span> <span style="background-color:#5F0000"><font color="#FFFFFF"> 🏳️ 节点27…  FAIL </font></span> <span style="background-color:#005F87"><font color="#FFFFFF"> 🏳️ 节点28…  342ms </font></span> <span style="background-color:#005F00"><font color="#FFFFFF"> 🏳️ 节点29…  129ms </font></span> <span style="background-color:#005F87"><font color="#FFFFFF"> 🏳️ 节点30…  218ms </font></span>
+<span style="background-color:#005F00"><font color="#FFFFFF"> 🏳️ 节点31…   29ms </font></span> <span style="background-color:#005F00"><font color="#FFFFFF"> 🏳️ 节点32…   64ms </font></span> <span style="background-color:#005F00"><font color="#FFFFFF"> 🏳️ 节点33…   28ms </font></span> <span style="background-color:#005F00"><font color="#FFFFFF"> 🏳️ 节点34…  119ms </font></span> <span style="background-color:#005F00"><font color="#FFFFFF"> 🏳️ 节点35…   43ms </font></span> <span style="background-color:#005F87"><font color="#FFFFFF"> 🏳️ 节点36…  333ms </font></span>
+<span style="background-color:#005F00"><font color="#FFFFFF"> 🏳️ 节点37…   82ms </font></span> <span style="background-color:#005F00"><font color="#FFFFFF"> 🏳️ 节点38…  114ms </font></span> <span style="background-color:#005F87"><font color="#FFFFFF"> 🏳️ 节点39…  376ms </font></span> <span style="background-color:#005F00"><font color="#FFFFFF"> 🏳️ 节点40…  182ms </font></span> <span style="background-color:#AF0000"><font color="#FFFFFF"> 🏳️ 节点41… 1005ms </font></span> <span style="background-color:#005F00"><font color="#FFFFFF"> 🏳️ 节点42…  174ms </font></span>
+<span style="background-color:#005F87"><font color="#FFFFFF"> 🏳️ 节点43…  243ms </font></span> <span style="background-color:#005F00"><font color="#FFFFFF"> 🏳️ 节点44…  181ms </font></span> <span style="background-color:#005F87"><font color="#FFFFFF"> 🏳️ 节点45…  313ms </font></span> <span style="background-color:#005F00"><font color="#FFFFFF"> 🏳️ 节点46…  188ms </font></span> <span style="background-color:#005F00"><font color="#FFFFFF"> 🏳️ 节点47…  192ms </font></span> <span style="background-color:#005F87"><font color="#FFFFFF"> 🏳️ 节点48…  302ms </font></span>
+<span style="background-color:#005F87"><font color="#FFFFFF"> 🏳️ 节点49…  354ms </font></span> <span style="background-color:#005F87"><font color="#FFFFFF"> 🏳️ 节点50…  289ms </font></span> <span style="background-color:#005F87"><font color="#FFFFFF"> 🏳️ 节点51…  350ms </font></span> <span style="background-color:#5F0000"><font color="#FFFFFF"> 🏳️ 节点52…  FAIL </font></span>
+
+<font color="#AAAAAA">2. 逐个下载测速...</font>
+<font color="#AAAAAA">#1 🏳️ 节点A    </font><span style="background-color:#005F87"><font color="#FFFFFF">   70M </font></span><span style="background-color:#005F00"><font color="#FFFFFF">  144M   274M   299M   219M   571M   600M   436M   233M   231M </font></span>  <b>231 Mbps</b>  10.0 MB  0.35s
+<font color="#AAAAAA">#2 🏳️ 节点B    </font><span style="background-color:#005F87"><font color="#FFFFFF">   67M </font></span><span style="background-color:#005F00"><font color="#FFFFFF">  137M   167M   611M   312M   921M   387M   224M  1570M   237M </font></span>  <b>237 Mbps</b>  10.0 MB  0.34s
+<font color="#AAAAAA">#3 🏳️ 节点C    </font><span style="background-color:#005F87"><font color="#FFFFFF">   54M </font></span><span style="background-color:#005F00"><font color="#FFFFFF">  130M   248M   270M   282M   206M  3559M   325M   921M   184M </font></span>  <b>184 Mbps</b>  10.0 MB  0.43s
+<font color="#AAAAAA">#4 🏳️ 节点D    </font><span style="background-color:#005F87"><font color="#FFFFFF">   75M </font></span><span style="background-color:#005F00"><font color="#FFFFFF">  147M   282M   287M   188M  4008M   355M   834M   257M   242M </font></span>  <b>242 Mbps</b>  10.0 MB  0.33s
+<font color="#AAAAAA">#5 🏳️ 节点E    </font><span style="background-color:#005F87"><font color="#FFFFFF">   62M </font></span><span style="background-color:#005F00"><font color="#FFFFFF">  124M   144M   900M   271M   327M   893M   393M   933M   195M </font></span>  <b>195 Mbps</b>  10.0 MB  0.41s</pre>
+
+<table>
+<thead>
+<tr><th>节点</th><th>平均速度</th><th>峰值</th><th>warmup</th><th>TTFB</th><th>下载量</th><th>耗时</th><th>延迟</th></tr>
+</thead>
+<tbody>
+<tr><td>🏳️ 节点D</td><td><b>242 Mbps</b></td><td><span style="color:#2AA1B3">246 Mbps</span></td><td>173 ms</td><td>52 ms</td><td>10.0 MB</td><td>0.33s</td><td><span style="color:#26A269">31ms</span></td></tr>
+<tr><td>🏳️ 节点B</td><td><b>237 Mbps</b></td><td><span style="color:#2AA1B3">317 Mbps</span></td><td>190 ms</td><td>52 ms</td><td>10.0 MB</td><td>0.34s</td><td><span style="color:#26A269">26ms</span></td></tr>
+<tr><td>🏳️ 节点A</td><td><b>231 Mbps</b></td><td><span style="color:#2AA1B3">251 Mbps</span></td><td>189 ms</td><td>51 ms</td><td>10.0 MB</td><td>0.35s</td><td><span style="color:#26A269">31ms</span></td></tr>
+<tr><td>🏳️ 节点E</td><td><b>195 Mbps</b></td><td><span style="color:#2AA1B3">401 Mbps</span></td><td>198 ms</td><td>58 ms</td><td>10.0 MB</td><td>0.41s</td><td><span style="color:#26A269">28ms</span></td></tr>
+<tr><td>🏳️ 节点C</td><td><b>184 Mbps</b></td><td><span style="color:#2AA1B3">351 Mbps</span></td><td>188 ms</td><td>57 ms</td><td>10.0 MB</td><td>0.43s</td><td><span style="color:#26A269">31ms</span></td></tr>
+</tbody>
+</table>
+
+<pre><font color="#A347BA"><b>最快节点:</b></font> <font color="#26A269">🏳️ 节点D</font>  （平均 242 Mbps · 峰值 246 Mbps）
+<font color="#26A269">✓ 已切换</font></pre>
+
+</details>
+
 ## 测速原理
 
 **为什么 `best`/`speed` 要先用延迟筛 N 个候选？**
