@@ -18,10 +18,12 @@ pub struct Config {
     pub delay_timeout: u64,    // MIHOMO_DELAY_TIMEOUT (ms)
     pub parallel: usize,       // MIHOMO_PARALLEL
     pub conf_dir: String,      // MIHOMO_CONF_DIR
-    pub conf: String,          // $conf_dir/config.yaml
-    pub suburl_file: String,   // $conf_dir/suburl
+    pub conf: String,          // $conf_dir/config.yaml (符号链接 → subs/<当前>/config.yaml)
+    pub suburl_file: String,   // $conf_dir/suburl (旧单订阅模式遗留, 兼容读取)
     pub sub_ua: String,        // MIHOMO_SUB_UA
     pub svc: String,           // mihomo@<user>
+    pub subs_dir: String,      // $conf_dir/subs (每个订阅一个子目录)
+    pub current_file: String,  // $conf_dir/current (当前活跃订阅名, 单行)
 }
 
 impl Config {
@@ -58,6 +60,8 @@ impl Config {
             suburl_file: format!("{}/suburl", conf_dir),
             sub_ua: std::env::var("MIHOMO_SUB_UA").unwrap_or_else(|_| "clash.meta".to_string()),
             svc: format!("mihomo@{}", user),
+            subs_dir: format!("{}/subs", conf_dir),
+            current_file: format!("{}/current", conf_dir),
             conf_dir,
         }
     }

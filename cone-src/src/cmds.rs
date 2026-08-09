@@ -474,17 +474,36 @@ pub async fn cmd_pick(client: &Client, do_ping: bool) {
 }
 
 // ============================== update ==============================
+/// 更新当前活跃订阅。读取 cfg.current_file 得到订阅名, 拉取其 suburl 并重载。
+/// url 参数临时覆盖该订阅的 suburl (并持久化写回)。
 pub async fn cmd_update(client: &Client, cfg: &Config, url: Option<&str>) {
+    migrate_from_legacy(cfg);
+    let name = current_sub(cfg).unwrap_or_else(|| {
+        die("尚无订阅。请先添加: cone-cli sub add <名字> <URL>");
+    });
+    pull_one(client, cfg, &name, url).await;
+}
+
+/// 对指定订阅拉取一次: URL 来源 参数 > env > subs/<name>/suburl 文件。
+/// 写入 subs/<name>/config.yaml, 注入 tun/external-controller, 统计节点数。
+/// 若 name == 当前订阅则重载 mihomo, 否则提示 sub use 生效。
+async fn pull_one(client: &Client, cfg: &Config, name: &str, url: Option<&str>) {
     let c = pick_colors();
-    // 解析订阅地址: 参数 > env > 已保存文件
+    let dir = sub_dir(cfg, name);
+    std::fs::create_dir_all(&dir).unwrap_or_else(|e| die(&format!("无法创建订阅目录: {e}")));
+    let conf = sub_conf(cfg, name);
+    let suburl = format!("{}/suburl", dir);
+
+    // 解析 URL: 参数 > env > subs/<name>/suburl 文件 > 顶层 legacy suburl (兼容)
     let url = url
         .map(|s| s.to_string())
         .or_else(|| std::env::var("MIHOMO_SUB_URL").ok())
+        .or_else(|| std::fs::read_to_string(&suburl).ok().map(|s| s.trim().to_string()))
         .or_else(|| std::fs::read_to_string(&cfg.suburl_file).ok().map(|s| s.trim().to_string()))
-        .unwrap_or_else(|| die("未指定订阅地址。用法: cone-cli update <URL> (首次需提供，之后会记住)"));
+        .unwrap_or_else(|| die(&format!("订阅 [{}] 未记录 URL。用法: cone-cli sub add {} <URL>", name, name)));
 
     std::fs::create_dir_all(&cfg.conf_dir).unwrap_or_else(|e| die(&format!("无法创建配置目录: {e}")));
-    println!("{}正在拉取订阅...{}", c.dim, c.reset);
+    println!("{}正在拉取订阅 [{}]...{}", c.dim, name, c.reset);
     let resp = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(30))
         .build()
@@ -509,43 +528,55 @@ pub async fn cmd_update(client: &Client, cfg: &Config, url: Option<&str>) {
         die("返回内容不是 clash 配置 (缺少 proxies/groups/rules)。可能 UA 不被识别或链接有误");
     }
     // 备份旧配置
-    if std::path::Path::new(&cfg.conf).exists() {
-        let _ = std::fs::copy(&cfg.conf, format!("{}.bak", cfg.conf));
+    if std::path::Path::new(&conf).exists() {
+        let _ = std::fs::copy(&conf, format!("{}.bak", conf));
     }
-    std::fs::write(&cfg.conf, &body).unwrap_or_else(|e| die(&format!("写入配置失败: {e}")));
-    std::fs::write(&cfg.suburl_file, &url).unwrap_or_else(|e| die(&format!("保存订阅地址失败: {e}")));
+    std::fs::write(&conf, &body).unwrap_or_else(|e| die(&format!("写入配置失败: {e}")));
+    std::fs::write(&suburl, &url).unwrap_or_else(|e| die(&format!("保存订阅地址失败: {e}")));
 
     // 注入 tun.yaml (幂等: 仅当 config 不含 ^tun: 才追加, 对齐第 393 行)
-    let tun_yaml = format!("{}/tun.yaml", cfg.conf_dir);
-    if std::path::Path::new(&tun_yaml).exists()
-        && !body.lines().any(|l| l.starts_with("tun:")) {
-        let tun = std::fs::read_to_string(&tun_yaml).unwrap_or_default();
-        let mut combined = body.clone();
-        combined.push('\n');
-        combined.push_str(&tun);
-        std::fs::write(&cfg.conf, &combined).unwrap_or_else(|e| die(&format!("注入 tun.yaml 失败: {e}")));
-    }
+    inject_tun_at(&conf, &cfg.conf_dir);
     // 确保 external-controller 开启 (与 cfg.api 一致), 否则 cone-cli 无法连接 mihomo API
-    if let Err(e) = ensure_external_controller(cfg) {
+    if let Err(e) = ensure_external_controller_at(&conf, &cfg.api) {
         eprintln!("{}⚠ 注入 external-controller 失败: {e}{}", c.yellow, c.reset);
     }
     // 精确统计 proxies 段节点数 (按行正则状态机, 对齐第 397 行 awk)
-    let content = std::fs::read_to_string(&cfg.conf).unwrap_or_default();
+    let content = std::fs::read_to_string(&conf).unwrap_or_default();
     let node_count = count_proxies(&content);
-    println!("{}✓ 订阅已更新{}  → {} ({} 个节点)", c.green, c.reset, cfg.conf, node_count);
-    println!("旧配置备份: {}.bak", cfg.conf);
+    println!("{}✓ 订阅 [{}] 已更新{}  → {} ({} 个节点)", c.green, name, c.reset, conf, node_count);
+    println!("旧配置备份: {}.bak", conf);
 
-    // 重载三条分支 (对齐第 402-417 行)
-    let running = Command::new("pgrep").args(["-x", "mihomo"]).status().map(|s| s.success()).unwrap_or(false);
+    // 若是当前订阅则重载, 否则提示
+    let cur = current_sub(cfg);
+    if cur.as_deref() == Some(name) {
+        ensure_symlink(cfg, name);
+        reload_mihomo(cfg).await;
+    } else {
+        println!("{}提示: [{}] 非当前订阅, 未重载。执行 {}sub use {}{} 切换生效",
+                 c.dim, name, c.green, name, c.reset);
+    }
+    let _ = client;
+}
+
+/// 重载 mihomo: 若进程在跑且由 systemd 管理 → systemctl restart;
+/// 否则提示手动操作。供 cmd_update / cmd_sub 共用
+async fn reload_mihomo(cfg: &Config) {
+    let c = pick_colors();
+    let running = Command::new("pgrep").args(["-x", "mihomo"])
+        .stdout(Stdio::null()).stderr(Stdio::null())
+        .status().map(|s| s.success()).unwrap_or(false);
     if running {
         let is_systemd = Command::new("systemctl")
             .args(["is-active", "--quiet", &cfg.svc])
+            .stdout(Stdio::null()).stderr(Stdio::null())
             .status().map(|s| s.success()).unwrap_or(false);
         if is_systemd {
             println!("{}正在重启 mihomo 服务...{}", c.dim, c.reset);
-            let r = Command::new("sudo").args(["systemctl", "restart", &cfg.svc]).status();
+            let r = Command::new("sudo").args(["systemctl", "restart", &cfg.svc])
+                .stdout(Stdio::null()).stderr(Stdio::null()).status();
             tokio::time::sleep(std::time::Duration::from_secs(2)).await;
             let ok = Command::new("systemctl").args(["is-active", "--quiet", &cfg.svc])
+                .stdout(Stdio::null()).stderr(Stdio::null())
                 .status().map(|s| s.success()).unwrap_or(false);
             match r {
                 Ok(_) if ok => println!("{}✓ mihomo 已重载{}", c.green, c.reset),
@@ -555,9 +586,189 @@ pub async fn cmd_update(client: &Client, cfg: &Config, url: Option<&str>) {
             println!("{}mihomo 在运行但非 systemd 管理，请手动重启{}", c.yellow, c.reset);
         }
     } else {
-        println!("{}mihomo 未运行，配置已就绪 (start.sh start 启动){}", c.dim, c.reset);
+        println!("{}mihomo 未运行，配置已就绪 (cone-cli start 启动){}", c.dim, c.reset);
     }
-    // 避免 unused warning (client 在 update 里不用, 但保持签名一致)
+}
+
+// ============================== 多订阅管理 ==============================
+// 每个订阅一个独立目录 subs/<name>/, 顶层 config.yaml 是符号链接指向当前订阅。
+// service 文件写死 -f .../config.yaml, 通过软链切换无需改 service。
+
+/// 订阅目录: subs/<name>/
+fn sub_dir(cfg: &Config, name: &str) -> String {
+    format!("{}/{}", cfg.subs_dir, name)
+}
+
+/// 订阅配置文件: subs/<name>/config.yaml
+fn sub_conf(cfg: &Config, name: &str) -> String {
+    format!("{}/config.yaml", sub_dir(cfg, name))
+}
+
+/// 读取当前活跃订阅名。current 文件不存在/为空时返回 None
+fn current_sub(cfg: &Config) -> Option<String> {
+    std::fs::read_to_string(&cfg.current_file)
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
+/// 写入当前活跃订阅名
+fn set_current_sub(cfg: &Config, name: &str) {
+    std::fs::create_dir_all(&cfg.conf_dir).unwrap_or_else(|e| die(&format!("无法创建配置目录: {e}")));
+    std::fs::write(&cfg.current_file, name).unwrap_or_else(|e| die(&format!("写入 current 失败: {e}")));
+}
+
+/// 列出 subs/ 下所有订阅名 (按字母序)
+fn list_subs(cfg: &Config) -> Vec<String> {
+    let mut names = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(&cfg.subs_dir) {
+        for e in entries.flatten() {
+            if e.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                if let Some(n) = e.file_name().to_str() {
+                    if !n.starts_with('.') {
+                        names.push(n.to_string());
+                    }
+                }
+            }
+        }
+    }
+    names.sort();
+    names
+}
+
+/// 重建顶层 config.yaml 软链 → subs/<name>/config.yaml
+/// 幂等: 先删旧 config.yaml (文件或软链), 再建软链。失败则 die
+fn ensure_symlink(cfg: &Config, name: &str) {
+    let target = sub_conf(cfg, name);
+    let link = &cfg.conf;
+    // 删除现有 config.yaml (可能是普通文件=旧模式, 或软链)
+    let _ = std::fs::remove_file(link);
+    std::os::unix::fs::symlink(&target, link)
+        .unwrap_or_else(|e| die(&format!("创建软链 {} → {} 失败: {e}", link, target)));
+}
+
+/// 从旧单订阅模式迁移到多订阅模式 (幂等)
+/// 触发条件: 顶层 suburl 存在 且 subs/ 不存在。
+/// 动作: 建 subs/default/, 拷贝顶层 config.yaml 过去, 软链指向它, current=default。
+pub fn migrate_from_legacy(cfg: &Config) {
+    let c = pick_colors();
+    let legacy_suburl_exists = std::path::Path::new(&cfg.suburl_file).exists();
+    let subs_exists = std::path::Path::new(&cfg.subs_dir).exists();
+    if !legacy_suburl_exists || subs_exists {
+        return; // 无需迁移
+    }
+    println!("{}检测到旧单订阅模式, 正在迁移到多订阅模式...{}", c.dim, c.reset);
+
+    let name = "default";
+    let dir = sub_dir(cfg, name);
+    std::fs::create_dir_all(&dir).unwrap_or_else(|e| die(&format!("迁移失败: 无法创建 {dir}: {e}")));
+
+    // suburl 复制到 subs/default/
+    let _ = std::fs::copy(&cfg.suburl_file, format!("{}/suburl", dir));
+
+    // 顶层 config.yaml (普通文件) 复制为 subs/default/config.yaml
+    if std::path::Path::new(&cfg.conf).exists()
+        && !std::fs::symlink_metadata(&cfg.conf).map(|m| m.file_type().is_symlink()).unwrap_or(false)
+    {
+        let _ = std::fs::copy(&cfg.conf, sub_conf(cfg, name));
+        let _ = std::fs::remove_file(&cfg.conf);
+    }
+    ensure_symlink(cfg, name);
+    set_current_sub(cfg, name);
+    println!("{}✓ 已迁移为订阅 [{}]{} (顶层 config.yaml 现为软链; 旧 suburl 文件保留兼容)", c.green, name, c.reset);
+}
+
+/// cmd_sub 命令组入口
+pub async fn cmd_sub(client: &Client, cfg: &Config, action: &str, name: Option<&str>, url: Option<&str>) {
+    let c = pick_colors();
+    migrate_from_legacy(cfg);
+    match action {
+        "add" => {
+            let name = name.unwrap_or_else(|| die("用法: cone-cli sub add <名字> <URL>"));
+            let url = url.unwrap_or_else(|| die("用法: cone-cli sub add <名字> <URL>"));
+            if std::path::Path::new(&sub_dir(cfg, name)).exists() {
+                die(&format!("订阅 [{}] 已存在。删除: cone-cli sub rm {}", name, name));
+            }
+            std::fs::create_dir_all(&sub_dir(cfg, name))
+                .unwrap_or_else(|e| die(&format!("无法创建订阅目录: {e}")));
+            // 先写 suburl, 让 pull_one 能读到 (pull_one 也接受 url 参数, 这里双保险)
+            std::fs::write(format!("{}/suburl", sub_dir(cfg, name)), url)
+                .unwrap_or_else(|e| die(&format!("写入 suburl 失败: {e}")));
+            // 先设为当前, 这样 pull_one 走"当前订阅"分支, 自动建软链 + reload
+            set_current_sub(cfg, name);
+            pull_one(client, cfg, name, Some(url)).await;
+            println!("{}✓ 已添加订阅 [{}]{} 并设为当前", c.green, name, c.reset);
+        }
+        "list" | "ls" => {
+            let subs = list_subs(cfg);
+            if subs.is_empty() {
+                println!("{}尚无订阅。添加: cone-cli sub add <名字> <URL>{}", c.dim, c.reset);
+                return;
+            }
+            let cur = current_sub(cfg);
+            println!("{}{}订阅列表{} (✶ = 当前):", c.bold, c.magenta, c.reset);
+            for n in &subs {
+                let mark = if cur.as_deref() == Some(n.as_str()) { "✶" } else { " " };
+                let nodes = std::fs::read_to_string(sub_conf(cfg, n))
+                    .ok()
+                    .map(|s| count_proxies(&s))
+                    .unwrap_or(0);
+                println!("  {} {}{}{}  ({} 个节点)", mark, c.cyan, n, c.reset, nodes);
+            }
+        }
+        "use" => {
+            let name = name.unwrap_or_else(|| die("用法: cone-cli sub use <名字>"));
+            if !std::path::Path::new(&sub_dir(cfg, name)).exists() {
+                die(&format!("订阅 [{}] 不存在。查看: cone-cli sub list", name));
+            }
+            if std::path::Path::new(&sub_conf(cfg, name)).exists() {
+                set_current_sub(cfg, name);
+                ensure_symlink(cfg, name);
+                reload_mihomo(cfg).await;
+                let nodes = std::fs::read_to_string(sub_conf(cfg, name))
+                    .ok().map(|s| count_proxies(&s)).unwrap_or(0);
+                println!("{}✓ 已切换到订阅 [{}]{} ({} 个节点)", c.green, name, c.reset, nodes);
+            } else {
+                die(&format!("订阅 [{}] 尚无配置。执行: cone-cli sub add {} <URL> 或先 update", name, name));
+            }
+        }
+        "rm" => {
+            let name = name.unwrap_or_else(|| die("用法: cone-cli sub rm <名字> [--force]"));
+            let force = url == Some("--force");
+            let dir = sub_dir(cfg, name);
+            if !std::path::Path::new(&dir).exists() {
+                die(&format!("订阅 [{}] 不存在", name));
+            }
+            let is_current = current_sub(cfg).as_deref() == Some(name);
+            if is_current && !force {
+                die(&format!("[{}] 是当前订阅, 拒绝删除。先 sub use 切换其他订阅, 或: cone-cli sub rm {} --force", name, name));
+            }
+            std::fs::remove_dir_all(&dir).unwrap_or_else(|e| die(&format!("删除失败: {e}")));
+            if is_current {
+                // 删的是当前: 回退到任一剩余订阅, 没有则清空软链
+                let remaining = list_subs(cfg);
+                if let Some(next) = remaining.first() {
+                    set_current_sub(cfg, next);
+                    ensure_symlink(cfg, next);
+                    reload_mihomo(cfg).await;
+                    println!("{}✓ 已删除 [{}], 回退到 [{}]{}", c.yellow, name, next, c.reset);
+                } else {
+                    let _ = std::fs::remove_file(&cfg.conf);
+                    let _ = std::fs::remove_file(&cfg.current_file);
+                    println!("{}✓ 已删除 [{}] (最后一个订阅, 顶层软链已清空){}", c.yellow, name, c.reset);
+                }
+            } else {
+                println!("{}✓ 已删除订阅 [{}]{}", c.green, name, c.reset);
+            }
+        }
+        "current" => {
+            match current_sub(cfg) {
+                Some(n) => println!("{}", n),
+                None => println!("{}尚无活跃订阅{}", c.dim, c.reset),
+            }
+        }
+        _ => die("用法: cone-cli sub {add|list|use|rm|current}"),
+    }
     let _ = client;
 }
 
@@ -726,11 +937,17 @@ fn strip_url_scheme(url: &str) -> String {
 /// 已存在则覆盖, 不存在则在文件开头插入。幂等: 文件不存在时直接 Ok(())
 /// (mihomo 的 external-controller 只接受 host:port, 不带 scheme)
 fn ensure_external_controller(cfg: &Config) -> std::io::Result<()> {
-    if !std::path::Path::new(&cfg.conf).exists() {
+    ensure_external_controller_at(&cfg.conf, &cfg.api)
+}
+
+/// 参数化版本: 对任意目标 config 路径注入 external-controller
+/// (多订阅模式下, 每个订阅 config 都需要注入, 不一定是顶层 cfg.conf)
+fn ensure_external_controller_at(conf: &str, api: &str) -> std::io::Result<()> {
+    if !std::path::Path::new(conf).exists() {
         return Ok(());
     }
-    let content = std::fs::read_to_string(&cfg.conf)?;
-    let addr = strip_url_scheme(&cfg.api);
+    let content = std::fs::read_to_string(conf)?;
+    let addr = strip_url_scheme(api);
     let target_line = format!("external-controller: {}", addr);
 
     let mut found = false;
@@ -756,7 +973,27 @@ fn ensure_external_controller(cfg: &Config) -> std::io::Result<()> {
     if content.ends_with('\n') {
         result.push('\n');
     }
-    std::fs::write(&cfg.conf, result)
+    std::fs::write(conf, result)
+}
+
+/// 注入 tun.yaml 到目标 config (幂等: 仅当 config 不含 ^tun: 才追加)
+/// tun.yaml 顶层共享 (TUN 是全局设置, 与订阅无关), 但注入到每个订阅 config
+fn inject_tun_at(conf: &str, conf_dir: &str) {
+    let tun_yaml = format!("{}/tun.yaml", conf_dir);
+    if !std::path::Path::new(&tun_yaml).exists() {
+        return;
+    }
+    let content = std::fs::read_to_string(conf).unwrap_or_default();
+    if content.lines().any(|l| l.starts_with("tun:")) {
+        return; // 已含 tun 段, 跳过
+    }
+    let tun = std::fs::read_to_string(&tun_yaml).unwrap_or_default();
+    let mut combined = content;
+    if !combined.ends_with('\n') {
+        combined.push('\n');
+    }
+    combined.push_str(&tun);
+    std::fs::write(conf, &combined).unwrap_or_else(|e| die(&format!("注入 tun.yaml 失败: {e}")));
 }
 
 // ============================== help ==============================
@@ -788,7 +1025,13 @@ pub fn cmd_help() {
     println!("  {}use{} <关键字>        直接切换节点，支持模糊匹配", c.green, c.reset);
     println!("  {}start{}               启动 mihomo 服务 (需 sudo)", c.green, c.reset);
     println!("  {}stop{}                停止 mihomo 服务 (需 sudo)", c.green, c.reset);
-    println!("  {}update{} [URL]        拉取订阅生成 config.yaml 并自动重载", c.green, c.reset);
+    println!("  {}update{} [URL]        拉取并更新当前订阅 (URL 临时覆盖并记住)", c.green, c.reset);
+    println!("  {}sub{} <act> [名] [URL] 管理多个订阅:", c.green, c.reset);
+    println!("                        sub add <名字> <URL>   新增订阅并设为当前");
+    println!("                        sub list                列出所有订阅 (✶=当前)");
+    println!("                        sub use <名字>          切换当前订阅");
+    println!("                        sub rm <名字> [--force] 删除订阅");
+    println!("                        sub current             显示当前订阅名");
     println!("  {}service{} <act>       控制 mihomo 服务 {{on|off|restart|status}}", c.green, c.reset);
     println!("  {}tun{} <act>           控制 TUN {{on|off|status}}", c.green, c.reset);
     println!("  {}help{}                显示本帮助", c.green, c.reset);

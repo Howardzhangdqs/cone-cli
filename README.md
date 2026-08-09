@@ -9,7 +9,7 @@
 
 ## 特性
 
-- 11 个子命令：status / list / ping / speed / best / pick / use / update / service / tun / help
+- 12 个子命令：status / list / ping / speed / best / pick / use / update / sub / service / tun / help
 - 并发延迟测试：基于 tokio 异步并发，单节点测完即输出，无需等待全部完成
 - 吞吐测速：下载过程实时显示速率、已下载量与用时
 - 测速报告：包含平均速度、峰值速度、warmup 耗时、TTFB、下载量、总耗时，按平均速度排序
@@ -75,7 +75,8 @@ mihomo 下载完成后，如果是交互式终端且系统有 systemd，会询�
 | `cone-cli use <关键字>` | 直接切换节点，支持模糊匹配 |
 | `cone-cli start` | 启动 mihomo 服务（需 sudo，等同 `service on`） |
 | `cone-cli stop` | 停止 mihomo 服务（需 sudo，等同 `service off`） |
-| `cone-cli update [URL]` | 拉取订阅生成 config.yaml 并自动重载 |
+| `cone-cli update [URL]` | 更新当前订阅（URL 可选，临时覆盖并记住）；自动重载 |
+| `cone-cli sub <act> [名] [URL]` | 管理多个订阅：`add 名 URL` / `list` / `use 名` / `rm 名 [--force]` / `current` |
 | `cone-cli service <act>` | 控制 mihomo 服务（on/off/restart/status，需 sudo） |
 | `cone-cli tun <act>` | 控制 TUN 全局透明代理（on/off/status） |
 | `cone-cli help` | 显示帮助 |
@@ -113,10 +114,32 @@ cone-cli best 香港 -n 3           # 在香港节点里选最快
 cone-cli pick                     # fzf 即时选节点
 cone-cli pick ping                # 边看延迟边选
 cone-cli use 日本                 # 切到日本节点（模糊匹配）
-cone-cli update                   # 更新订阅（首次需 cone-cli update <URL>）
+cone-cli sub add home <URL>       # 添加名为 home 的订阅（自动拉取并设为当前）
+cone-cli sub add office <URL>     # 再加一个 office 订阅
+cone-cli sub list                 # 列出所有订阅（✶ 标记当前）
+cone-cli sub use home             # 切换当前订阅为 home（改软链 + 重载）
+cone-cli update                   # 更新当前订阅（home）；update <URL> 可临时换源
 cone-cli service status           # 查看 mihomo 服务状态
 cone-cli tun on                   # 开启 TUN 全局透明代理
 ```
+
+## 多订阅管理
+
+`cone-cli` 支持同时维护多份独立订阅配置，每份订阅是 `~/.config/mihomo/subs/<名字>/` 下的一个独立目录（各含自己的 `config.yaml` 与 `suburl`）。顶层 `config.yaml` 始终是一个**符号链接**，指向当前活跃订阅的配置——切换订阅即改软链并重载 mihomo，无需改动 systemd service。
+
+```
+~/.config/mihomo/
+├── config.yaml   → subs/<当前>/config.yaml   # 软链，service 的 -f 读这里
+├── subs/
+│   ├── home/      { config.yaml, suburl }
+│   └── office/    { config.yaml, suburl }
+└── current        # 单行文本：当前活跃订阅名
+```
+
+- **首次使用**：`sub add <名字> <URL>` 添加第一个订阅，它会被设为当前。
+- **旧单订阅升级**：若检测到旧模式（顶层 `suburl` 文件且无 `subs/` 目录），首次执行任意 `sub`/`update` 命令会自动迁移为名为 `default` 的订阅，原配置无损保留。
+- **`sub rm <当前>`** 默认拒绝，避免误删正在用的配置；加 `--force` 可强制删除并自动回退到任一剩余订阅。
+- `cache.db` / `geoip.metadb` / 日志在顶层共享（按配置隔离、缓存共享）；TUN 设置（`tun.yaml`）顶层共享，每个订阅 `update` 时自动注入。
 
 ## 演示
 

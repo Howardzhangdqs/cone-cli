@@ -65,9 +65,18 @@ enum Cmd {
     Start,
     /// 停止 mihomo 服务 (等同 service off, 需 sudo)
     Stop,
-    /// 拉取订阅生成 config.yaml 并自动重载
-    #[command(alias = "sub")]
+    /// 拉取订阅生成 config.yaml 并自动重载 (更新当前活跃订阅)
     Update { url: Option<String> },
+    /// 管理多个订阅 (add/list/use/rm/current)
+    Sub {
+        /// 子动作: add | list | use | rm | current
+        action: String,
+        /// 订阅名 (add/use/rm 需要; add 的 URL 作为第三位置参数)
+        name: Option<String>,
+        /// add 时的 URL, 或 rm 时的 --force 标志
+        #[arg(allow_hyphen_values = true)]
+        url: Option<String>,
+    },
     /// 控制 mihomo 服务 (on/off/restart/status)
     #[command(alias = "svc")]
     Service {
@@ -140,6 +149,9 @@ fn main() {
         Cmd::Start => cmds::cmd_service(&cfg, "start"),
         Cmd::Stop => cmds::cmd_service(&cfg, "stop"),
         Cmd::Update { url } => rt.block_on(cmds::cmd_update(&client, &cfg, url.as_deref())),
+    Cmd::Sub { action, name, url } => {
+        rt.block_on(cmds::cmd_sub(&client, &cfg, &action, name.as_deref(), url.as_deref()))
+    }
         Cmd::Service { act } => cmds::cmd_service(&cfg, &act),
         Cmd::Tun { act } => rt.block_on(cmds::cmd_tun(&client, &cfg, &act)),
     }
