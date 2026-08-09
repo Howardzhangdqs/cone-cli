@@ -559,7 +559,8 @@ async fn pull_one(client: &Client, cfg: &Config, name: &str, url: Option<&str>) 
 }
 
 /// 重载 mihomo: 若进程在跑且由 systemd 管理 → systemctl restart;
-/// 否则提示手动操作。供 cmd_update / cmd_sub 共用
+/// 若在跑但非 systemd → kill 后用同级 mihomo 二进制重新后台启动 (加载新 config);
+/// 若未运行 → 同样后台启动。供 cmd_update / cmd_sub 共用。
 async fn reload_mihomo(cfg: &Config) {
     let c = pick_colors();
     let running = Command::new("pgrep").args(["-x", "mihomo"])
@@ -583,10 +584,74 @@ async fn reload_mihomo(cfg: &Config) {
                 _ => eprintln!("{}✗ mihomo 重启失败，查看: journalctl -u {}{}", c.red, cfg.svc, c.reset),
             }
         } else {
-            println!("{}mihomo 在运行但非 systemd 管理，请手动重启{}", c.yellow, c.reset);
+            // 非 systemd: kill 旧进程, 用同级 mihomo 二进制重新后台启动
+            start_mihomo_detached(cfg, true).await;
         }
     } else {
-        println!("{}mihomo 未运行，配置已就绪 (cone-cli start 启动){}", c.dim, c.reset);
+        // 未运行: 同样后台启动
+        start_mihomo_detached(cfg, false).await;
+    }
+}
+
+/// 用 cone-cli 同级目录的 mihomo 二进制后台启动 (nohup 风格)。
+/// restart=true 时先 kill 已有的非 systemd mihomo 进程。
+/// 日志重定向到 conf_dir/mihomo.log。启动后等待 API 可达并打印结果。
+async fn start_mihomo_detached(cfg: &Config, restart: bool) {
+    let c = pick_colors();
+    let bin = match crate::mihomo_setup::mihomo_path() {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("{}✗ 找不到 mihomo 二进制: {e}{}", c.red, c.reset);
+            return;
+        }
+    };
+    if restart {
+        println!("{}正在重启 mihomo (非 systemd, 手动拉起)...{}", c.dim, c.reset);
+        let _ = Command::new("pkill").arg("-x").arg("mihomo")
+            .stdout(Stdio::null()).stderr(Stdio::null()).status();
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    } else {
+        println!("{}正在启动 mihomo (非 systemd)...{}", c.dim, c.reset);
+    }
+    let log_path = format!("{}/mihomo.log", cfg.conf_dir);
+    // stdout 与 stderr 都追加写同一日志文件 (各自一个 fd)
+    let open_log = || std::fs::OpenOptions::new().create(true).append(true).open(&log_path);
+    let stdout_fd = match open_log() {
+        Ok(f) => Stdio::from(f),
+        Err(e) => {
+            eprintln!("{}✗ 无法打开日志 {log_path}: {e}{}", c.red, c.reset);
+            return;
+        }
+    };
+    let stderr_fd = match open_log() {
+        Ok(f) => Stdio::from(f),
+        Err(e) => {
+            eprintln!("{}✗ 无法打开日志 {log_path}: {e}{}", c.red, c.reset);
+            return;
+        }
+    };
+    // detached 后台进程: 父进程退出后仍存活
+    let spawn = Command::new(&bin)
+        .arg("-d").arg(&cfg.conf_dir)
+        .arg("-f").arg(&cfg.conf)
+        .stdin(Stdio::null())
+        .stdout(stdout_fd)
+        .stderr(stderr_fd)
+        .spawn();
+    match spawn {
+        Ok(child) => {
+            drop(child); // 不持有 handle, 让它独立存活
+            tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+            let ok = Command::new("pgrep").args(["-x", "mihomo"])
+                .stdout(Stdio::null()).stderr(Stdio::null())
+                .status().map(|s| s.success()).unwrap_or(false);
+            if ok {
+                println!("{}✓ mihomo 已启动 (PID 由 pgrep 确认存活){}", c.green, c.reset);
+            } else {
+                eprintln!("{}✗ mihomo 启动后未存活, 查看日志: {log_path}{}", c.red, c.reset);
+            }
+        }
+        Err(e) => eprintln!("{}✗ 启动 mihomo 失败: {e}{}", c.red, c.reset),
     }
 }
 
