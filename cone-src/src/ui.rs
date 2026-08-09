@@ -16,6 +16,21 @@ pub struct Colors {
     pub dim: &'static str,
     pub blue: &'static str,
     pub magenta: &'static str,
+    // 背景色 (热力砖块墙用, 256 色码跨终端更一致)
+    pub on_green: &'static str,
+    pub on_cyan: &'static str,
+    pub on_yellow: &'static str,
+    pub on_red: &'static str,
+    pub on_magenta: &'static str,
+    // 前景黑/亮白 (在彩色背景上保证对比度)
+    pub fg_black: &'static str,
+    pub fg_white: &'static str,
+    // 256 色前景 (下载测速砖块条用, 与上面背景同色板但走前景码)
+    pub fg_green: &'static str,
+    pub fg_cyan: &'static str,
+    pub fg_yellow: &'static str,
+    pub fg_red: &'static str,
+    pub fg_magenta: &'static str,
 }
 
 pub const ANSI: Colors = Colors {
@@ -28,6 +43,20 @@ pub const ANSI: Colors = Colors {
     dim: "\u{1b}[2m",
     blue: "\u{1b}[34m",
     magenta: "\u{1b}[35m",
+    // 256 色背景: 深绿22 / 深海青24 / 橄榄黄58 / 正红124 / 暗血红52
+    on_green: "\u{1b}[48;5;22m",
+    on_cyan: "\u{1b}[48;5;24m",
+    on_yellow: "\u{1b}[48;5;58m",
+    on_red: "\u{1b}[48;5;124m",
+    on_magenta: "\u{1b}[48;5;52m",
+    fg_black: "\u{1b}[30m",
+    fg_white: "\u{1b}[97m",
+    // 256 色前景 (同色板, 38;5;N)
+    fg_green: "\u{1b}[38;5;22m",
+    fg_cyan: "\u{1b}[38;5;24m",
+    fg_yellow: "\u{1b}[38;5;58m",
+    fg_red: "\u{1b}[38;5;124m",
+    fg_magenta: "\u{1b}[38;5;52m",
 };
 
 pub const PLAIN: Colors = Colors {
@@ -40,6 +69,18 @@ pub const PLAIN: Colors = Colors {
     dim: "",
     blue: "",
     magenta: "",
+    on_green: "",
+    on_cyan: "",
+    on_yellow: "",
+    on_red: "",
+    on_magenta: "",
+    fg_black: "",
+    fg_white: "",
+    fg_green: "",
+    fg_cyan: "",
+    fg_yellow: "",
+    fg_red: "",
+    fg_magenta: "",
 };
 
 // 延迟失败哨兵 (对齐 bash 的 999999)
@@ -250,6 +291,155 @@ fn render_row(cells: Vec<(String, Align)>, col_widths: &[usize], pad: usize) -> 
     s
 }
 
+// ============================== 热力砖块墙 (x ping 风格) ==============================
+// 每个节点渲染成一块带背景色的等宽砖, 砖内左对齐节点名 + 右对齐延迟值;
+// 砖块紧贴自动折行拼接成墙, 颜色一眼分好坏。
+
+/// 延迟 → (背景色, 前景色) 分档, 用于热力砖块
+/// 256 色背景 (跨终端一致): 失败暗血红52 / 绿22 / 青海24 / 黄58 / 正红124
+/// 深底上统一用亮白字保证对比度
+/// - d >= FAIL_MS  → 暗血红底 + 白字 (失败)
+/// - d < 200       → 深绿底 + 白字
+/// - d < 500       → 深海青底 + 白字
+/// - d < 1000      → 橄榄黄底 + 白字
+/// - d >= 1000     → 正红底 + 白字
+pub fn delay_cell_colors(c: &Colors, d: i64) -> (&'static str, &'static str) {
+    if d >= FAIL_MS {
+        (c.on_magenta, c.fg_white)
+    } else if d < 200 {
+        (c.on_green, c.fg_white)
+    } else if d < 500 {
+        (c.on_cyan, c.fg_white)
+    } else if d < 1000 {
+        (c.on_yellow, c.fg_white)
+    } else {
+        (c.on_red, c.fg_white)
+    }
+}
+
+/// 速度 (Mbps) → 背景色分档 (用于下载测速砖块, 与 delay_cell_colors 同款色板, 越快越绿)
+/// ≥100 深绿 / ≥50 深海青 / ≥20 橄榄黄 / ≥5 正红 / <5 暗血红
+pub fn speed_cell_bg(c: &Colors, mbps: i64) -> &'static str {
+    if mbps >= 100 {
+        c.on_green
+    } else if mbps >= 50 {
+        c.on_cyan
+    } else if mbps >= 20 {
+        c.on_yellow
+    } else if mbps >= 5 {
+        c.on_red
+    } else {
+        c.on_magenta
+    }
+}
+
+/// 渲染单个下载测速砖块 (固定显示宽度 = width), 显示该 1MB 区间速度
+/// 砖内: [左1空格][速度 右对齐 如 "120M"][右1空格], 整块铺按速度分档的背景色
+fn render_speed_brick(c: &Colors, mbps: i64, width: usize) -> String {
+    let bg = speed_cell_bg(c, mbps);
+    let text = format!("{}M", mbps);
+    let inner_w = width.saturating_sub(2); // 去掉左右各 1 内边距
+    let content = pad_left(&text, inner_w); // 右对齐到 inner_w
+    format!("{}{} {} {}", bg, c.fg_white, content, c.reset)
+}
+
+/// 渲染下载测速砖块条 (固定 10 块, 每块代表 target/10 字节)
+/// - seg_mbps[i] = Some(mbps): 第 i 段已完成, 显示该段速度, 按速度分档背景色
+/// - 其余段 (含进行中、未开始): 灰色占位 (固定宽度, 保持对齐)
+/// 返回不带换行的单行字符串
+pub fn render_speed_bricks(c: &Colors, seg_mbps: &[Option<i64>], brick_w: usize) -> String {
+    let mut s = String::new();
+    let inner_w = brick_w.saturating_sub(2);
+    let placeholder = " ".repeat(inner_w);
+    for i in 0..10usize {
+        match seg_mbps.get(i).copied().flatten() {
+            Some(mbps) => s.push_str(&render_speed_brick(c, mbps, brick_w)),
+            None => s.push_str(&format!("{}[{}]{}", c.dim, placeholder, c.reset)),
+        }
+    }
+    s
+}
+
+/// 按显示宽度截断字符串, 超宽时末尾用 "…" 收尾
+/// (节点名超长时避免破坏砖块对齐)
+fn truncate_width(s: &str, width: usize) -> String {
+    let w = display_width(s);
+    if w <= width {
+        return s.to_string();
+    }
+    if width == 0 {
+        return String::new();
+    }
+    // 逐字符累加显示宽度, 留 1 列给 "…"
+    let limit = width - 1;
+    let mut out = String::new();
+    let mut cur = 0usize;
+    for ch in s.chars() {
+        let cw = ch.to_string().width();
+        if cur + cw > limit {
+            break;
+        }
+        out.push(ch);
+        cur += cw;
+    }
+    out.push('…');
+    out
+}
+
+/// 渲染单个热力砖块 (固定显示宽度 = width)
+/// 砖内布局: [左1空格][节点名 左对齐/截断][1空格][延迟值 右对齐][右1空格], 整块铺背景色
+/// 失败节点延迟显示 "FAIL"
+/// 总显示宽度 = 1 + name_w + 1 + delay_w + 1 = width, 故 name_w = width - delay_w - 3
+pub fn render_heat_brick(c: &Colors, name: &str, ms: i64, width: usize) -> String {
+    let (bg, fg) = delay_cell_colors(c, ms);
+    let delay_text = if ms >= FAIL_MS {
+        "FAIL".to_string()
+    } else {
+        format!("{}ms", ms)
+    };
+    let delay_w = display_width(&delay_text);
+    // name_w 至少留 2 列, 防止 width 太小; name_w + delay_w + 3 可能 < width, 末尾补齐
+    let name_w = width.saturating_sub(delay_w + 3).max(2);
+    let name_fit = truncate_width(name, name_w);
+    let name_padded = pad_right(&name_fit, name_w);
+    let delay_padded = pad_left(&delay_text, delay_w);
+    // 末尾补齐: 若 width 极小导致 name_w 被 max(2) 抬高, 总宽可能超过 width; 反之不足则补空格
+    let actual_w = 1 + name_w + 1 + delay_w + 1;
+    let trailing = if actual_w < width { " ".repeat(width - actual_w) } else { String::new() };
+    format!("{}{} {} {} {}{}", bg, fg, name_padded, delay_padded, trailing, c.reset)
+}
+
+/// 渲染整面热力砖块墙: results 按延迟升序排好 (失败节点因 FAIL_MS 最大自然在末尾)
+/// 每行容纳 per_row = max(1, (term_width + gap) / (brick_w + gap)) 块
+/// 相邻砖块之间留 1 个空格 (gap=1), 行末不留空格
+pub fn render_heat_wall(c: &Colors, results: &[(i64, String)], term_width: usize, brick_w: usize) -> String {
+    if results.is_empty() {
+        return String::new();
+    }
+    let bw = brick_w.max(1);
+    let gap = 1usize;
+    // 每块占 bw, 块间 gap; 一行 n 块占 bw*n + gap*(n-1); 解出 n = (term + gap) / (bw + gap)
+    let per_row = ((term_width + gap) / (bw + gap)).max(1);
+    let mut out = String::new();
+    for chunk in results.chunks(per_row) {
+        for (i, (ms, name)) in chunk.iter().enumerate() {
+            if i > 0 {
+                out.push(' '); // 块间 1 空格
+            }
+            out.push_str(&render_heat_brick(c, name, *ms, bw));
+        }
+        out.push('\n');
+    }
+    out
+}
+
+/// 探测终端列数, 失败/非 tty (管道) 时回退 80
+pub fn term_columns() -> usize {
+    terminal_size::terminal_size()
+        .map(|(w, _)| w.0 as usize)
+        .unwrap_or(80)
+}
+
 // ============================== 单元测试 ==============================
 #[cfg(test)]
 mod tests {
@@ -335,6 +525,168 @@ mod tests {
         // 100 Mbps
         let s = speed_bar(&ANSI, 12_500_000.0);
         assert!(s.contains(ANSI.green), "100Mbps 应绿: {}", s);
+    }
+
+    // ---------- 热力砖块墙测试 ----------
+
+    #[test]
+    fn delay_cell_colors_thresholds() {
+        // 失败 -> 暗血红底白字
+        let (bg, fg) = delay_cell_colors(&ANSI, 999_999);
+        assert_eq!(bg, ANSI.on_magenta);
+        assert_eq!(fg, ANSI.fg_white);
+        // <200 -> 深绿底白字
+        let (bg, fg) = delay_cell_colors(&ANSI, 84);
+        assert_eq!(bg, ANSI.on_green);
+        assert_eq!(fg, ANSI.fg_white);
+        // <500 -> 深海青底白字
+        let (bg, fg) = delay_cell_colors(&ANSI, 300);
+        assert_eq!(bg, ANSI.on_cyan);
+        assert_eq!(fg, ANSI.fg_white);
+        // <1000 -> 橄榄黄底白字
+        let (bg, fg) = delay_cell_colors(&ANSI, 700);
+        assert_eq!(bg, ANSI.on_yellow);
+        assert_eq!(fg, ANSI.fg_white);
+        // >=1000 -> 正红底白字
+        let (bg, fg) = delay_cell_colors(&ANSI, 1500);
+        assert_eq!(bg, ANSI.on_red);
+        assert_eq!(fg, ANSI.fg_white);
+    }
+
+    #[test]
+    fn heat_brick_plain_width_matches() {
+        // PLAIN 模式: 砖块纯文本显示宽度应恰为 width
+        for width in [16usize, 20, 24, 30] {
+            let s = render_heat_brick(&PLAIN, "香港节点", 84, width);
+            let plain = strip_ansi(&s);
+            let w = display_width(&plain);
+            assert_eq!(w, width, "width={}: got {} (\"{}\")", width, w, plain);
+        }
+    }
+
+    #[test]
+    fn heat_brick_ansi_width_matches() {
+        // ANSI 模式: 去掉 ANSI 后宽度仍为 width (背景色不占显示宽度)
+        let s = render_heat_brick(&ANSI, "日本东-01", 86, 22);
+        let plain = strip_ansi(&s);
+        assert_eq!(display_width(&plain), 22, "plain: {}", plain);
+        // 含背景色码
+        assert!(s.contains(ANSI.on_green), "应绿底: {}", s);
+        assert!(s.contains(ANSI.fg_white), "应白字: {}", s);
+    }
+
+    #[test]
+    fn heat_brick_fail_shows_fail() {
+        let s = render_heat_brick(&ANSI, "德国法兰", 999_999, 22);
+        let plain = strip_ansi(&s);
+        assert!(plain.contains("FAIL"), "失败应显示 FAIL: {}", plain);
+        assert_eq!(display_width(&plain), 22);
+        assert!(s.contains(ANSI.on_magenta), "失败应暗血红底: {}", s);
+    }
+
+    #[test]
+    fn heat_brick_long_name_truncated() {
+        // 超长节点名应被截断到砖块宽度内, 不破坏对齐
+        let long = "这是一个非常非常非常长的节点名字应该被截断";
+        let s = render_heat_brick(&PLAIN, long, 84, 22);
+        let plain = strip_ansi(&s);
+        assert_eq!(display_width(&plain), 22, "截断后宽度应=22: \"{}\"", plain);
+        assert!(plain.contains('…'), "应含省略号: {}", plain);
+        assert!(plain.contains("84ms"), "应含延迟: {}", plain);
+    }
+
+    #[test]
+    fn heat_wall_layout_wraps() {
+        let c = &PLAIN;
+        let results: Vec<(i64, String)> = vec![
+            (84, "A".into()),
+            (100, "B".into()),
+            (242, "C".into()),
+        ];
+        let brick_w = 22;
+        // term_width 只够 1 块 -> 3 行 (per_row = (22+1)/(22+1) = 1)
+        let wall = render_heat_wall(c, &results, brick_w, brick_w);
+        assert_eq!(wall.matches('\n').count(), 3, "每块独占一行应 3 换行:\n{}", wall);
+        // term_width 够 3 块 -> 1 行 (3 块需 22*3+2=68 列, per_row = 69/23 = 3)
+        let wall = render_heat_wall(c, &results, brick_w * 3 + 2, brick_w);
+        assert_eq!(wall.matches('\n').count(), 1, "3 块一行应 1 换行:\n{}", wall);
+    }
+
+    #[test]
+    fn heat_wall_empty_is_empty() {
+        let wall = render_heat_wall(&PLAIN, &[], 80, 22);
+        assert!(wall.is_empty());
+    }
+
+    #[test]
+    fn heat_wall_failed_nodes_at_end() {
+        // 砖墙接收的 results 应已按延迟升序排好 (调用方负责); 这里只验证渲染不区分可达/失败
+        let results: Vec<(i64, String)> = vec![
+            (84, "快".into()),
+            (999_999, "失败".into()),
+        ];
+        let wall = render_heat_wall(&ANSI, &results, 22, 22); // 每行 1 块
+        let plain = strip_ansi(&wall);
+        assert!(plain.contains("84ms"));
+        assert!(plain.contains("FAIL"));
+    }
+
+    // ---------- 下载测速砖块条测试 ----------
+
+    #[test]
+    fn speed_cell_bg_thresholds() {
+        // ≥100 深绿 / ≥50 青 / ≥20 黄 / ≥5 红 / <5 暗血红
+        assert_eq!(speed_cell_bg(&ANSI, 150), ANSI.on_green);
+        assert_eq!(speed_cell_bg(&ANSI, 100), ANSI.on_green);
+        assert_eq!(speed_cell_bg(&ANSI, 60), ANSI.on_cyan);
+        assert_eq!(speed_cell_bg(&ANSI, 50), ANSI.on_cyan);
+        assert_eq!(speed_cell_bg(&ANSI, 30), ANSI.on_yellow);
+        assert_eq!(speed_cell_bg(&ANSI, 20), ANSI.on_yellow);
+        assert_eq!(speed_cell_bg(&ANSI, 10), ANSI.on_red);
+        assert_eq!(speed_cell_bg(&ANSI, 5), ANSI.on_red);
+        assert_eq!(speed_cell_bg(&ANSI, 3), ANSI.on_magenta);
+        assert_eq!(speed_cell_bg(&ANSI, 0), ANSI.on_magenta);
+    }
+
+    #[test]
+    fn speed_bricks_shows_mbps_numbers() {
+        // 已完成段应显示速度数字 (如 "120M"), 未完成段为灰色占位
+        let seg: Vec<Option<i64>> = vec![Some(120), Some(45)];
+        let s = render_speed_bricks(&ANSI, &seg, 7);
+        let plain = strip_ansi(&s);
+        assert!(plain.contains("120M"), "应显示 120M: {}", plain);
+        assert!(plain.contains("45M"), "应显示 45M: {}", plain);
+    }
+
+    #[test]
+    fn speed_bricks_partial_placeholder_count() {
+        // 2 段完成 + 8 段占位: 占位是 [...] 形式 (含方括号)
+        let seg: Vec<Option<i64>> = vec![Some(120), Some(80)];
+        let s = render_speed_bricks(&ANSI, &seg, 7);
+        let plain = strip_ansi(&s);
+        // 8 个占位, 每个含一对 []
+        let brackets = plain.matches('[').count();
+        assert_eq!(brackets, 8, "应有 8 个占位 []: {}", plain);
+    }
+
+    #[test]
+    fn speed_bricks_all_done_no_placeholder() {
+        let seg: Vec<Option<i64>> = vec![Some(100); 10];
+        let s = render_speed_bricks(&ANSI, &seg, 7);
+        let plain = strip_ansi(&s);
+        assert!(!plain.contains('['), "全完成应无占位: {}", plain);
+        // 应有 10 个 "100M"
+        assert_eq!(plain.matches("100M").count(), 10);
+    }
+
+    #[test]
+    fn speed_bricks_plain_no_ansi() {
+        // PLAIN 模式: 无 ANSI 码
+        let s = render_speed_bricks(&PLAIN, &[Some(100), Some(50)], 7);
+        assert!(!s.contains('\u{1b}'));
+        let plain = strip_ansi(&s);
+        assert!(plain.contains("100M"));
+        assert!(plain.contains("50M"));
     }
 
     fn strip_ansi(s: &str) -> String {

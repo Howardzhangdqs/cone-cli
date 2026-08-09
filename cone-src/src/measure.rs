@@ -83,10 +83,10 @@ async fn run_once<F>(
     client: &Client,
     speed_url: &str,
     target_bytes: u64,
-    progress_cb: Option<&F>,
+    mut progress_cb: Option<&mut F>,
 ) -> Option<SpeedDetail>
 where
-    F: Fn(u64, f64),
+    F: FnMut(u64, f64),
 {
     let proxy = reqwest::Proxy::all(&client.cfg.px).ok()?;
     let http = reqwest::Client::builder()
@@ -146,7 +146,7 @@ where
         }
         let start_ref = download_start.unwrap_or(req_start);
         let elapsed = start_ref.elapsed().as_secs_f64();
-        if let Some(cb) = progress_cb {
+        if let Some(cb) = progress_cb.as_mut() {
             cb(total, elapsed);
         }
         if total >= target_bytes {
@@ -175,18 +175,19 @@ where
 /// 对齐 measure_speed: 重试条件 = 平均速率 < 1024 B/s 或失败 -> sleep 1 -> 重测一次
 pub async fn measure_speed<F>(
     client: &Client,
-    progress_cb: Option<&F>,
+    progress_cb: Option<F>,
 ) -> SpeedDetail
 where
-    F: Fn(u64, f64),
+    F: FnMut(u64, f64),
 {
-    let detail = run_once(client, &client.cfg.speed_url, client.cfg.speed_bytes, progress_cb)
+    let mut cb = progress_cb;
+    let detail = run_once(client, &client.cfg.speed_url, client.cfg.speed_bytes, cb.as_mut())
         .await;
     let spd_avg = detail.as_ref().map(|d| d.avg_bps).unwrap_or(0.0);
     // 重试: 平均速率 < 1024 或失败 -> sleep 1 -> 重测一次 (对齐第 128-131 行)
     if spd_avg < 1024.0 {
         tokio::time::sleep(Duration::from_secs(1)).await;
-        if let Some(r) = run_once(client, &client.cfg.speed_url, client.cfg.speed_bytes, progress_cb).await {
+        if let Some(r) = run_once(client, &client.cfg.speed_url, client.cfg.speed_bytes, cb.as_mut()).await {
             return r;
         }
     }

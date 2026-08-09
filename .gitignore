@@ -14,5 +14,8 @@ cone-src/Cargo.lock
 *.swo
 .DS_Store
 
+# 本地工具目录
+.zcode/
+
 # 本地配置 (含敏感订阅信息)
 # 注意: config.yaml 在 ~/.config/mihomo 下, 通常不在仓库内

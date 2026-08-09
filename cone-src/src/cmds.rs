@@ -80,52 +80,46 @@ pub async fn cmd_ping(client: &Client, n: usize, filter: Option<&str>) {
         println!("{}▶ 延迟测试中 (并发 {}, 即时显示)...{}", c.dim, client.cfg.parallel, c.reset);
     }
     let total = nodes.len();
+    let term_w = crate::ui::term_columns();
+    let brick_w = 26usize;
 
-    // spinner 计数 + 流式结果: 用 pb.println 把结果行打印到 spinner 上方, 避免抢占
+    // spinner + 实时热力墙: 把整面墙作为多行 message, 每完成一个节点就重拼墙并 set_message,
+    // indicatif 会原地清行重绘 (不向下滚动)。墙按「完成顺序」增长, 不排序。
     let spinner = ProgressBar::new(total as u64);
     spinner.set_style(
-        ProgressStyle::with_template("{spinner} {msg} {wide_bar} {pos}/{len}")
+        ProgressStyle::with_template(
+            "{spinner} {pos}/{len} 测延迟中  {wide_bar}\n{msg}")
             .unwrap()
             .tick_chars("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"),
     );
-    spinner.set_message("测延迟中");
+    spinner.enable_steady_tick(std::time::Duration::from_millis(100));
+    spinner.set_message(format!("{}(等待结果...){}", c.dim, c.reset));
 
-    let mut cache: Vec<(i64, String)> = Vec::with_capacity(total);
+    // 完成顺序缓存 (直接作为墙的内容, 不再排序)
+    let mut done: Vec<(i64, String)> = Vec::with_capacity(total);
     let spinner_ref = &spinner;
     latency_stream(client, nodes, client.cfg.parallel, |r: DelayResult| {
-        let line = format!("  {}  {}", delay_tag(c, r.ms), r.name);
-        spinner_ref.println(line); // 打到 spinner 上方, 光标由 indicatif 管理
+        done.push((r.ms, r.name));
+        // 每来一个新砖块, 重新拼整面墙 -> set_message 触发原地重绘
+        let wall = crate::ui::render_heat_wall(c, &done, term_w, brick_w);
+        spinner_ref.set_message(wall);
         spinner_ref.inc(1);
-        cache.push((r.ms, r.name));
     }).await;
-    spinner.finish_and_clear();
+    // finish (而非 finish_and_clear) 保留最后一帧墙在终端
+    spinner.finish();
 
     // 统计
-    let ok = cache.iter().filter(|(d, _)| *d < FAIL_MS).count();
-    let fail = cache.len() - ok;
+    let ok = done.iter().filter(|(d, _)| *d < FAIL_MS).count();
+    let fail = done.len() - ok;
 
-    // Top N 表格
-    let mut sorted: Vec<(i64, String)> = cache.into_iter().filter(|(d, _)| *d < FAIL_MS).collect();
-    sorted.sort_by_key(|(d, _)| *d);
-    let top: Vec<(i64, String)> = sorted.into_iter().take(n).collect();
-
-    println!();
-    println!("{}{}★ Top {} 最快{}", c.bold, c.magenta, top.len(), c.reset);
-    if top.is_empty() {
-        println!("{}无可达节点{}", c.dim, c.reset);
-    } else {
-        let rows: Vec<Vec<Cell>> = top
-            .iter()
-            .enumerate()
-            .map(|(i, (d, name))| vec![
-                Cell::new(format!("{}#{}{}", c.green, i + 1, c.reset)).right(),
-                Cell::new(delay_tag(c, *d)),
-                Cell::new(name.clone()),
-            ])
-            .collect();
-        println!("{}", render_table(&["名次", "延迟", "节点"], &rows));
+    // 最终: 若实际完成数 > n, 只保留前 n 个 (完成顺序) 重绘一次墙; 否则墙上已是全部结果
+    if done.len() > n {
+        let top: Vec<(i64, String)> = done.into_iter().take(n).collect();
+        println!();
+        println!("{}{}★ 延迟热力图{}  {}显示前 {} / {} (按完成顺序, 按延迟分色: 绿<200 · 青<500 · 黄<1000 · 红≥1000 · 暗血红失败){}",
+                 c.bold, c.magenta, c.reset, c.dim, top.len(), total, c.reset);
+        println!("{}", crate::ui::render_heat_wall(c, &top, term_w, brick_w));
     }
-    println!();
     println!("{}共{} {}{}{} 节点可达,{} {}{}{} 失败{}",
              c.dim, c.reset, c.green, ok, c.dim, c.reset, c.red, fail, c.dim, c.reset);
 }
@@ -146,71 +140,107 @@ async fn pick_candidates(client: &Client, n: usize, filter: Option<&str>) -> Vec
     } else {
         println!("{}1. 延迟筛选 Top {} 候选 (即时显示)...{}", c.dim, n, c.reset);
     }
-    println!("{}1. 延迟筛选 Top {} 候选 (即时显示)...{}", c.dim, n, c.reset);
     let total = nodes.len();
+    let term_w = crate::ui::term_columns();
+    let brick_w = 26usize;
+    // spinner + 实时热力墙 (同 cmd_ping): 每完成一个节点就重拼墙 set_message 原地刷新
     let spinner = ProgressBar::new(total as u64);
     spinner.set_style(
-        ProgressStyle::with_template("{spinner} {msg} {wide_bar} {pos}/{len}")
+        ProgressStyle::with_template(
+            "{spinner} {pos}/{len} 测延迟中  {wide_bar}\n{msg}")
             .unwrap()
             .tick_chars("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"),
     );
-    spinner.set_message("测延迟中");
+    spinner.enable_steady_tick(std::time::Duration::from_millis(100));
+    spinner.set_message(format!("{}(等待结果...){}", c.dim, c.reset));
     let mut cache: Vec<(i64, String)> = Vec::with_capacity(total);
     let sc = &spinner;
     latency_stream(client, nodes, client.cfg.parallel, |r: DelayResult| {
-        sc.println(format!("  {}  {}", delay_tag(c, r.ms), r.name));
-        sc.inc(1);
         cache.push((r.ms, r.name));
+        let wall = crate::ui::render_heat_wall(c, &cache, term_w, brick_w);
+        sc.set_message(wall);
+        sc.inc(1);
     }).await;
-    spinner.finish_and_clear();
-    // 排序取 Top N
+    spinner.finish();
+    // 排序取 Top N (候选用于后续吞吐测速, 失败节点剔除)
     let mut sorted: Vec<(i64, String)> = cache.into_iter().filter(|(d, _)| *d < FAIL_MS).collect();
     sorted.sort_by_key(|(d, _)| *d);
     sorted.into_iter().take(n).map(|(_, name)| name).collect()
 }
 
-/// 单节点吞吐测速 + indicatif 实时进度条, 返回 (详细数据, 显示用的最终延迟字符串)
+/// 单节点吞吐测速 + 10 砖块进度墙, 返回 (详细数据, 显示用的最终延迟字符串)
 /// 对齐: 切换后 sleep 500ms (审核钉死项 8), 延迟用 node_delay 单点重查 (审核建议 B)
 async fn measure_one(client: &Client, name: &str, rank: usize, colors: &Colors) -> (SpeedDetail, String) {
     let c = colors;
     let _ = client.group_set(name).await.unwrap_or_else(|e| die(&e));
     tokio::time::sleep(std::time::Duration::from_millis(500)).await; // 切换后 sleep 500ms
 
-    // 真实进度条: 以已下载字节驱动, 显示 进度条 + 实时Mbps + 已下载MB + 用时
+    // 10 砖块进度墙: target 字节均分 10 段, 每块显示该 1MB 区间的速度 (Mbps), 按速度分色
     let target = client.cfg.speed_bytes;
+    let seg_bytes = (target / 10).max(1); // 每段字节数 (兜底防 0)
+    let brick_w = 7usize; // 每块显示宽度 (如 "120M" 右对齐 + 内边距)
     let pb = ProgressBar::new(target);
     pb.set_style(
-        ProgressStyle::with_template("{prefix} {wide_bar} {msg}")
-            .unwrap()
-            .progress_chars("█░ "),
+        ProgressStyle::with_template("{prefix} {msg}")
+            .unwrap(),
     );
     pb.set_prefix(format!("{}#{}{} {}",
         c.dim, rank, c.reset, pad_right(name, 28)));
     pb.enable_steady_tick(std::time::Duration::from_millis(100));
 
+    // 段状态: seg_mbps[i] = Some(mbps) 表示第 i 段已完成并记录了该段速度
+    // 追踪每段起始的 (bytes, elapsed), 跨段时算出上一段真实速度 commit
+    let mut seg_mbps: Vec<Option<i64>> = vec![None; 10];
+    let mut last_seg: usize = 0;
+    let mut seg_start_elapsed: f64 = 0.0;
     let pb_ref = &pb;
-    let detail = measure_speed(client, Some(&|bytes, elapsed| {
+    let detail = measure_speed(client, Some(|bytes, elapsed| {
         pb_ref.set_position(bytes);
+        let cur_seg = ((bytes / seg_bytes) as usize).min(9);
+        // 跨段: 把 [last_seg, cur_seg) 之间的段用「该段字节数 / 该段耗时」算出 Mbps commit
+        while last_seg < cur_seg {
+            let seg_elapsed: f64 = elapsed - seg_start_elapsed;
+            let mbps: i64 = if seg_elapsed > 0.0 {
+                let seg_bits: f64 = (seg_bytes as f64) * 8.0;
+                let mbps_f: f64 = seg_bits / 1_000_000.0 / seg_elapsed;
+                mbps_f.round() as i64
+            } else { 0 };
+            seg_mbps[last_seg] = Some(mbps);
+            seg_start_elapsed = elapsed;
+            last_seg += 1;
+        }
+        // 当前瞬时速度 (整体平均, 用于尾部数字显示)
         let bps: f64 = if elapsed > 0.0 { bytes as f64 / elapsed } else { 0.0 };
         let mbps = (bps * 8.0 / 1_000_000.0).round() as i64;
         let downloaded_mb = bytes as f64 / 1_000_000.0;
-        pb_ref.set_message(format!("{}{} Mbps{}  {}{:.1} MB{}  {}{:.2}s{}",
+        let bricks = crate::ui::render_speed_bricks(c, &seg_mbps, brick_w);
+        pb_ref.set_message(format!("{}  {}{} Mbps{}  {}{:.1} MB{}  {}{:.2}s{}",
+            bricks,
             c.bold, mbps, c.reset,
             c.dim, downloaded_mb, c.reset,
             c.dim, elapsed, c.reset));
     })).await;
 
-    // 延迟列: node_delay 单点重查 (失败返回 "-", bash 算术展开当 0 -> 绿色低延迟)
-    let delay_str = client.node_delay(name).await;
-    let delay_ms: i64 = delay_str.parse().unwrap_or(0);
-    // 定格保留进度条 (显示最终平均速度 + 下载量), 而非清除
+    // 测速结束: 收尾最后一段 (从 last_seg 到实际下载位置), 用平均速度
+    let final_seg = ((detail.downloaded / seg_bytes) as usize).min(10);
+    while last_seg < final_seg {
+        let avg_mbps = detail.avg_mbps().round() as i64;
+        seg_mbps[last_seg] = Some(avg_mbps);
+        last_seg += 1;
+    }
     let avg_mbps = detail.avg_mbps().round() as i64;
     let dl_mb = detail.downloaded as f64 / 1_000_000.0;
     let elapsed_sec = detail.elapsed_ms as f64 / 1000.0;
-    pb.finish_with_message(format!("{}{} Mbps{}  {}{:.1} MB{}  {}{:.2}s{}",
+    let bricks = crate::ui::render_speed_bricks(c, &seg_mbps, brick_w);
+    pb.finish_with_message(format!("{}  {}{} Mbps{}  {}{:.1} MB{}  {}{:.2}s{}",
+        bricks,
         c.bold, avg_mbps, c.reset,
         c.dim, dl_mb, c.reset,
         c.dim, elapsed_sec, c.reset));
+
+    // 延迟列: node_delay 单点重查 (失败返回 "-", bash 算术展开当 0 -> 绿色低延迟)
+    let delay_str = client.node_delay(name).await;
+    let delay_ms: i64 = delay_str.parse().unwrap_or(0);
     (detail, delay_tag(c, delay_ms))
 }
 
