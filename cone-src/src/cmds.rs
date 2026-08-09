@@ -495,6 +495,10 @@ pub async fn cmd_update(client: &Client, cfg: &Config, url: Option<&str>) {
         combined.push_str(&tun);
         std::fs::write(&cfg.conf, &combined).unwrap_or_else(|e| die(&format!("注入 tun.yaml 失败: {e}")));
     }
+    // 确保 external-controller 开启 (与 cfg.api 一致), 否则 cone-cli 无法连接 mihomo API
+    if let Err(e) = ensure_external_controller(cfg) {
+        eprintln!("{}⚠ 注入 external-controller 失败: {e}{}", c.yellow, c.reset);
+    }
     // 精确统计 proxies 段节点数 (按行正则状态机, 对齐第 397 行 awk)
     let content = std::fs::read_to_string(&cfg.conf).unwrap_or_default();
     let node_count = count_proxies(&content);
@@ -674,6 +678,51 @@ fn flip_tun_in_config(cfg: &Config, enable: bool) -> std::io::Result<()> {
         }
     }
     let mut result = out.join("\n");
+    if content.ends_with('\n') {
+        result.push('\n');
+    }
+    std::fs::write(&cfg.conf, result)
+}
+
+/// 从 URL 剥掉 scheme, 得到 host:port
+/// 例: "http://127.0.0.1:9090" → "127.0.0.1:9090"
+fn strip_url_scheme(url: &str) -> String {
+    url.trim_start_matches("https://")
+        .trim_start_matches("http://")
+        .to_string()
+}
+
+/// 确保 config.yaml 含有顶层 external-controller 行, 值与 cfg.api 一致
+/// 已存在则覆盖, 不存在则在文件开头插入。幂等: 文件不存在时直接 Ok(())
+/// (mihomo 的 external-controller 只接受 host:port, 不带 scheme)
+fn ensure_external_controller(cfg: &Config) -> std::io::Result<()> {
+    if !std::path::Path::new(&cfg.conf).exists() {
+        return Ok(());
+    }
+    let content = std::fs::read_to_string(&cfg.conf)?;
+    let addr = strip_url_scheme(&cfg.api);
+    let target_line = format!("external-controller: {}", addr);
+
+    let mut found = false;
+    let mut out: Vec<String> = Vec::new();
+    for line in content.lines() {
+        // 只匹配顶层键 (行首无缩进), 避免误伤缩进到其他段的同名字段
+        if line.starts_with("external-controller:") {
+            out.push(target_line.clone());
+            found = true;
+        } else {
+            out.push(line.to_string());
+        }
+    }
+    let mut result = if found {
+        out.join("\n")
+    } else {
+        // 文件开头插入 (顶层键顺序对 mihomo 无影响)
+        let mut combined = target_line;
+        combined.push('\n');
+        combined.push_str(&out.join("\n"));
+        combined
+    };
     if content.ends_with('\n') {
         result.push('\n');
     }
