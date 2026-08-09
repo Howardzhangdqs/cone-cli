@@ -4,7 +4,7 @@
 
 `cone-cli` 通过 mihomo 的 RESTful API 测试节点延迟与吞吐，并支持节点切换、订阅更新、服务控制等操作。相比 shell 脚本，提供了并发延迟测试、测速进度条、正确处理 CJK/emoji/ANSI 宽度的表格输出，以及单文件部署。
 
-![status 示例](https://img.shields.io/badge/platform-linux%20x86__64%20%7C%20arm64-blue)
+![platform](https://img.shields.io/badge/platform-linux%20x86__64%20%7C%20i686%20%7C%20arm64%20%7C%20armv7-blue)
 ![rust](https://img.shields.io/badge/Rust-1.75%2B-orange)
 
 ## 特性
@@ -19,7 +19,28 @@
 
 ## 快速开始
 
-### 安装
+### 下载预编译二进制（推荐）
+
+直接从 [Releases](../../releases) 下载对应架构的裸二进制，免去本地编译。按你的平台选：
+
+| 文件名 | 平台 |
+|--------|------|
+| `cone-cli-x86_64-unknown-linux-musl` | x86_64（绝大多数 PC/服务器，静态链接，推荐） |
+| `cone-cli-x86_64-unknown-linux-gnu` | x86_64（glibc 动态链接） |
+| `cone-cli-i686-unknown-linux-gnu` | x86 32 位 |
+| `cone-cli-aarch64-unknown-linux-musl` | ARM64（树莓派 4/5、ARM 服务器） |
+| `cone-cli-aarch64-unknown-linux-gnu` | ARM64（glibc 动态链接） |
+| `cone-cli-arm-unknown-linux-musleabihf` | ARM32（树莓派 2/3、嵌入式，静态链接） |
+| `cone-cli-arm-unknown-linux-gnueabihf` | ARM32（glibc 动态链接） |
+
+> `musl` 变体为完全静态链接，不依赖系统 glibc 版本，能在任意 Linux（含 Alpine、老 CentOS）运行，优先选它。
+
+```bash
+chmod +x cone-cli-<架构>
+./cone-cli-<架构> status   # 首次运行会自动下载 mihomo 核心
+```
+
+### 从源码编译
 
 ```bash
 # 1. 克隆仓库

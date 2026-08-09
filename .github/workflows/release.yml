@@ -1,0 +1,69 @@
+name: release
+
+# 推 v* 开头的 tag 触发构建并发布 release; 也支持手动触发便于调试
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write   # 创建 release / 上传 asset 需要
+
+jobs:
+  # ────────────── 矩阵并行交叉编译 ──────────────
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false   # 单个架构失败不连累其他, release 仍能产出可用二进制
+      matrix:
+        target:
+          - x86_64-unknown-linux-gnu
+          - x86_64-unknown-linux-musl
+          - aarch64-unknown-linux-gnu
+          - aarch64-unknown-linux-musl
+          - arm-unknown-linux-gnueabihf
+          - arm-unknown-linux-musleabihf
+          - i686-unknown-linux-gnu
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          target: ${{ matrix.target }}
+
+      # cross 自带各目标完整 C 工具链 (Docker 镜像), 能编译 ring 这类 C/汇编依赖
+      - name: Install cross
+        run: cargo install cross --git https://github.com/cross-rs/cross --locked
+
+      - name: Build
+        working-directory: cone-src
+        run: cross build --release --target ${{ matrix.target }}
+
+      # 产物重命名为带架构后缀的裸二进制 (不压缩, 单文件部署)
+      - name: Rename binary
+        run: |
+          mv cone-src/target/${{ matrix.target }}/release/cone-cli \
+             cone-cli-${{ matrix.target }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cone-cli-${{ matrix.target }}
+          path: cone-cli-${{ matrix.target }}
+
+  # ────────────── 汇总产物, 创建/更新 release ──────────────
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true   # 7 个架构二进制汇到同一目录
+
+      - name: List artifacts
+        run: ls -la artifacts/
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true   # 自动从 commit 生成 changelog
+          files: artifacts/*
