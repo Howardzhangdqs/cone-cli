@@ -1,23 +1,21 @@
 # Cone CLI
 
-> Mihomo (Clash.Meta) 的命令行测速与节点选择工具，用 Rust 编写。
+> Mihomo (Clash.Meta) 命令行测速与节点选择工具，Rust 编写。
 
-普通 Clash 客户端依赖 GUI，无法便捷的进行二次开发，也无法使用命令行操作。
-
-`cone-cli` 通过 mihomo 的 RESTful API 测节点延迟与带宽，并提供节点切换、订阅更新、服务控制等功能。相比传统 shell 脚本，它带来**真并发延迟测试**、**实时进度条**、**精确对齐的表格输出**（正确处理中文/emoji/ANSI 颜色码），以及单二进制零依赖部署。
+`cone-cli` 通过 mihomo 的 RESTful API 测试节点延迟与吞吐，并支持节点切换、订阅更新、服务控制等操作。相比 shell 脚本，提供了并发延迟测试、测速进度条、正确处理 CJK/emoji/ANSI 宽度的表格输出，以及单文件部署。
 
 ![status 示例](https://img.shields.io/badge/platform-linux%20x86__64%20%7C%20arm64-blue)
 ![rust](https://img.shields.io/badge/Rust-1.75%2B-orange)
 
 ## 特性
 
-- **11 个子命令**：status / list / ping / speed / best / pick / use / update / service / tun / help
-- **真并发延迟测试**：基于 tokio，所有节点全并发测延迟，测好即显示（不等全部完成）
-- **实时吞吐测速**：下载过程进度条实时刷新（速率 + 已下载量 + 用时），测完后定格保留
-- **详细测速报告**：平均速度、峰值速度、warmup 耗时、TTFB、下载量、总耗时，按平均速度排序
-- **精确表格对齐**：自研 unicode-width 渲染器，中文（2 列宽）、emoji 国旗、ANSI 颜色码混排也整齐
-- **自动安装 mihomo 核心**：首次运行检测到无 mihomo 二进制时，自动从 GitHub 下载最新 compatible 版（支持镜像站回退 + 进度条）
-- **单二进制**：rustls 静态链接，无 OpenSSL 依赖，编译后一个文件搞定
+- 11 个子命令：status / list / ping / speed / best / pick / use / update / service / tun / help
+- 并发延迟测试：基于 tokio 异步并发，单节点测完即输出，无需等待全部完成
+- 吞吐测速：下载过程实时显示速率、已下载量与用时
+- 测速报告：包含平均速度、峰值速度、warmup 耗时、TTFB、下载量、总耗时，按平均速度排序
+- 表格对齐：基于 unicode-width 计算显示宽度，正确处理 CJK 字符、emoji 与 ANSI 颜色码混排
+- 自动安装 mihomo：首次运行若未检测到 mihomo 二进制，自动从 GitHub 下载 compatible 版，支持镜像站回退
+- 单二进制：rustls 静态链接，无 OpenSSL 依赖
 
 ## 快速开始
 
@@ -124,10 +122,10 @@ cone-cli tun on                   # 开启 TUN 全局透明代理
 
 **为什么 `best`/`speed` 要先用延迟筛 N 个候选？**
 
-吞吐测速一次只能测一个节点（共享同一选择器，串行切换），全测很慢。而延迟与带宽高度相关，前 8~10 名几乎必含真正最快的。因此采用：
+吞吐测速一次只能测一个节点（共享同一选择器，串行切换），逐个测试全部节点耗时较长。而延迟与带宽存在相关性，延迟排名靠前的节点通常也具有较高的吞吐。因此采用两阶段策略：
 
-1. **延迟筛选**：全并发测延迟，取 Top N（默认 5）作为候选
-2. **吞吐精筛**：逐个切换候选节点，串行下载实测带宽（warmup → 流式下载 → 记录平均/峰值/TTFB 等）
+1. **延迟筛选**：并发测延迟，取 Top N（默认 5）作为候选
+2. **吞吐精筛**：逐个切换候选节点，串行下载实测带宽（warmup → 流式下载 → 记录平均/峰值/TTFB）
 
 **测速报告字段**：
 
@@ -160,20 +158,20 @@ cone-cli tun on                   # 开启 TUN 全局透明代理
 
 ## 技术栈
 
-- **Rust** + **tokio**：异步并发（延迟测试全并发，吞吐串行）
-- **reqwest**（rustls 后端）：无 OpenSSL 依赖，二进制可移植
-- **indicatif**：测速进度条（延迟 spinner + 吞吐实时速率）
-- **unicode-width**：自研表格渲染器，精确处理 CJK / emoji / ANSI 宽度
+- Rust + tokio：异步并发（延迟并发，吞吐串行）
+- reqwest（rustls 后端）：无 OpenSSL 依赖
+- indicatif：进度条
+- unicode-width：表格显示宽度计算（CJK / emoji / ANSI）
 
 ## 从 bash 版迁移
 
-本项目最初由一个 589 行的 bash 脚本演化而来，现已完全用 Rust 重写。相比原始 bash 版，Rust 版带来：
+本项目最初是一个 bash 脚本，后用 Rust 重写。相比 bash 版的改进：
 
-- 真并发延迟测试（bash 用 fork + 文件轮询模拟）
-- 吞吐测速实时进度条（bash 测完才显示）
-- 详细测速报告（峰值 / TTFB / warmup 等）
-- mihomo 核心自动下载 + systemd 服务引导
-- 精确的中文/emoji 表格对齐
+- 延迟测试改为异步并发（bash 版依赖 fork + 文件轮询）
+- 吞吐测速支持实时进度条
+- 测速报告增加峰值速度、TTFB、warmup 等字段
+- 增加 mihomo 核心自动下载与 systemd 服务引导
+- 表格输出基于 unicode-width 对齐，正确处理 CJK/emoji
 
 ## 许可
 
