@@ -5,11 +5,11 @@
 `cone-cli` 通过 mihomo 的 RESTful API 测试节点延迟与吞吐，并支持节点切换、订阅更新、服务控制等操作。相比 shell 脚本，提供了并发延迟测试、测速进度条、正确处理 CJK/emoji/ANSI 宽度的表格输出，以及单文件部署。
 
 ![platform](https://img.shields.io/badge/platform-linux%20x86__64%20%7C%20i686%20%7C%20arm64%20%7C%20armv7-blue)
-![rust](https://img.shields.io/badge/Rust-1.75%2B-orange)
+![rust](https://img.shields.io/badge/Rust-1.85%2B-orange)
 
 ## 特性
 
-- 12 个子命令：status / list / ping / speed / best / pick / use / update / sub / service / tun / help
+- 13 个子命令：status / list / ping / speed / best / pick / use / start / stop / update / sub / service / tun（无参数即显示帮助）
 - 并发延迟测试：基于 tokio 异步并发，单节点测完即输出，无需等待全部完成
 - 吞吐测速：下载过程实时显示速率、已下载量与用时
 - 测速报告：包含平均速度、峰值速度、warmup 耗时、TTFB、下载量、总耗时，按平均速度排序
@@ -47,7 +47,7 @@ chmod +x cone-cli-<架构>
 git clone https://github.com/Howardzhangdqs/cone-cli.git
 cd cone-cli
 
-# 2. 编译 (需 Rust 1.75+)
+# 2. 编译 (需 Rust 1.85+, edition 2024)
 cd cone-src
 cargo build --release
 cp target/release/cone-cli ..
