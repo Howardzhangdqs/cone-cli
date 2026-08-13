@@ -3,9 +3,8 @@ mihomo
 cone-cli
 *.bak
 
-# Rust
+# Rust (Cargo.lock 对二进制项目应入库以保证可复现构建)
 cone-src/target/
-cone-src/Cargo.lock
 
 # IDE
 .vscode/
