@@ -79,7 +79,7 @@ mihomo 下载完成后，如果是交互式终端且系统有 systemd，会询�
   安装? [Y/n]
 ```
 
-输入 `Y` 或直接回车即用 sudo 安装到 `/etc/systemd/system/` 并 daemon-reload；之后即可用 `cone-cli service on` 启动。输 `n` 跳过，之后可手动 `sudo cp mihomo@.service /etc/systemd/system/`。
+输入 `Y` 或直接回车即用 sudo 安装到 `/etc/systemd/system/` 并 daemon-reload。安装时 `cone-cli` 会按 mihomo 的**实际安装路径**自动生成 unit 文件（`ExecStart` 指向真正的 `mihomo` 二进制），因此无论 `cone-cli` 放在哪个目录都能正常启动。之后即可用 `cone-cli service on` 启动。输 `n` 跳过，之后可手动编辑仓库内的 `mihomo@.service`（把 `{BIN}` 占位符替换为 `mihomo` 绝对路径）再 `sudo cp mihomo@.service /etc/systemd/system/ && sudo systemctl daemon-reload`。
 
 ## 命令一览
 

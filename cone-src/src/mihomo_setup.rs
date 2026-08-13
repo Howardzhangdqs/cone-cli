@@ -187,6 +187,37 @@ fn set_executable(path: &Path) -> Result<(), String> {
 /// systemd service 模板的目标路径
 const SYSTEMD_UNIT: &str = "/etc/systemd/system/mihomo@.service";
 
+/// mihomo@.service unit 模板 (cone-cli 安装时按 mihomo 实际路径替换 {BIN})。
+/// 保留 %i (systemd 实例名 = 用户名) 用于 User 与 config 路径, 与 cfg.svc = mihomo@<user> 一致。
+const UNIT_TEMPLATE: &str = "# 由 cone-cli 按 mihomo 实际安装路径自动生成
+[Unit]
+Description=Mihomo (Clash.Meta) Daemon for %i
+Documentation=https://wiki.metacubex.one/
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=%i
+ExecStart={BIN} -d /home/%i/.config/mihomo -f /home/%i/.config/mihomo/config.yaml
+Restart=on-failure
+RestartSec=5
+# TUN 模式需要 cap_net_admin (创建虚拟网卡) + cap_net_raw
+AmbientCapabilities=CAP_NET_ADMIN CAP_NET_RAW
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW
+# 日志
+StandardOutput=append:/home/%i/.config/mihomo/mihomo.log
+StandardError=append:/home/%i/.config/mihomo/mihomo.log
+
+[Install]
+WantedBy=multi-user.target
+";
+
+/// 按 mihomo 实际绝对路径渲染 unit 文本 ({BIN} → bin)
+fn render_unit(bin: &str) -> String {
+    UNIT_TEMPLATE.replace("{BIN}", bin)
+}
+
 /// 检测 mihomo@.service 是否已安装到系统
 fn service_installed() -> bool {
     Path::new(SYSTEMD_UNIT).exists()
@@ -204,7 +235,8 @@ fn has_systemd() -> bool {
 }
 
 /// 下载 mihomo 后引导: 询问用户是否安装 systemd service
-/// 仅在交互式终端 + 有 systemd + service 未安装时询问
+/// 仅在交互式终端 + 有 systemd + service 未安装时询问。
+/// unit 文件按 mihomo 实际安装路径动态生成 (修正路径不一致), release 用户也可用。
 async fn maybe_install_service(c: &Colors) {
     // 非交互式 (管道/重定向) 或无 systemd 时跳过
     if !console::user_attended() {
@@ -218,15 +250,18 @@ async fn maybe_install_service(c: &Colors) {
         return; // 已安装, 不重复询问
     }
 
-    // 找到 cone-cli 同级目录下的 mihomo@.service 模板源文件
-    let tmpl = match self_dir() {
-        Ok(d) => d.join("mihomo@.service"),
+    // 解析 mihomo 二进制绝对路径 (canonicalize 解软链; 不存在则用原始路径)
+    let bin = match mihomo_path() {
+        Ok(p) => p.canonicalize().unwrap_or(p),
         Err(_) => return,
     };
-    if !tmpl.exists() {
-        println!("{}  未找到 mihomo@.service 模板, 跳过 service 安装{}", c.dim, c.reset);
-        return;
-    }
+    let bin = match bin.to_str() {
+        Some(s) => s.to_string(),
+        None => {
+            println!("{}  mihomo 路径含非 UTF-8 字符, 跳过 service 安装{}", c.dim, c.reset);
+            return;
+        }
+    };
 
     // 交互询问
     println!();
@@ -243,27 +278,34 @@ async fn maybe_install_service(c: &Colors) {
     let input = input.trim().to_lowercase();
     // 默认 Yes (空回车 / y / yes 都安装)
     if input == "n" || input == "no" {
-        println!("{}  已跳过。之后可用 `sudo cp mihomo@.service {}` 手动安装。{}",
-                 c.dim, SYSTEMD_UNIT, c.reset);
+        println!("{}  已跳过。之后重新触发 `cone-cli service on` 或手动渲染 unit 安装。{}",
+                 c.dim, c.reset);
         return;
     }
 
-    // 执行安装: sudo cp + daemon-reload
+    // 渲染 unit 并写临时文件, 再 sudo cp 到系统目录
     println!("{}  正在安装 (需要 sudo 密码)...{}", c.dim, c.reset);
+    let unit = render_unit(&bin);
+    let tmp = std::env::temp_dir().join("cone-cli-mihomo@.service");
+    if let Err(e) = std::fs::write(&tmp, &unit) {
+        println!("{}  × 写临时文件 {} 失败: {e}{}", c.red, tmp.display(), c.reset);
+        return;
+    }
     let ok = std::process::Command::new("sudo")
-        .args(["cp", &tmpl.display().to_string(), SYSTEMD_UNIT])
+        .args(["cp", &tmp.display().to_string(), SYSTEMD_UNIT])
         .status()
         .map(|s| s.success())
         .unwrap_or(false);
+    let _ = std::fs::remove_file(&tmp); // 清理临时文件
     if !ok {
-        println!("{}  × 安装失败 (sudo cp 出错), 请手动: sudo cp {} {}{}",
-                 c.red, tmpl.display(), SYSTEMD_UNIT, c.reset);
+        println!("{}  × 安装失败 (sudo cp 出错), 请手动渲染 unit 后: sudo cp <unit> {}{}",
+                 c.red, SYSTEMD_UNIT, c.reset);
         return;
     }
     // daemon-reload
     let _ = std::process::Command::new("sudo")
         .args(["systemctl", "daemon-reload"])
         .status();
-    println!("{}✓ mihomo@.service 已安装{}", c.green, c.reset);
+    println!("{}✓ mihomo@.service 已安装 (ExecStart={}){}", c.green, bin, c.reset);
     println!("{}  现在可以用 `cone-cli service on` 启动 mihomo 了{}", c.dim, c.reset);
 }

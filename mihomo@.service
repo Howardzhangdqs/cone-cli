@@ -1,8 +1,14 @@
-# 系统级 mihomo 服务模板 — 支持 TUN 全局透明代理
-# cone-cli 首次启动时会询问是否自动安装此文件
-# 手动安装: sudo cp mihomo@.service /etc/systemd/system/
-#          sudo systemctl enable --now mihomo@<用户名>
-#          例如: sudo systemctl enable --now mihomo@howardzhangdqs
+# systemd 模板服务 (TUN 需 cap_net_admin)
+#
+# cone-cli 首次下载 mihomo 后会在交互式终端询问, 并按 mihomo 的实际安装路径
+# 把下方 {BIN} 替换为真实路径, 自动生成 unit 到 /etc/systemd/system/mihomo@.service。
+# 因此无需手动操作, 且与 cone-cli 所在目录无关。
+#
+# 手动安装: 先把 {BIN} 替换为 mihomo 二进制的绝对路径, 再:
+#   sudo cp mihomo@.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now mihomo@<用户名>
+#   例如: sudo systemctl enable --now mihomo@howardzhangdqs
 [Unit]
 Description=Mihomo (Clash.Meta) Daemon for %i
 Documentation=https://wiki.metacubex.one/
@@ -12,7 +18,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=%i
-ExecStart=/home/%i/scripts/mihomo/mihomo -d /home/%i/.config/mihomo -f /home/%i/.config/mihomo/config.yaml
+ExecStart={BIN} -d /home/%i/.config/mihomo -f /home/%i/.config/mihomo/config.yaml
 Restart=on-failure
 RestartSec=5
 # TUN 模式需要 cap_net_admin (创建虚拟网卡) + cap_net_raw
