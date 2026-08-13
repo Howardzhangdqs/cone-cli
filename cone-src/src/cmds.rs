@@ -1,5 +1,5 @@
 // 子命令实现
-// 行为契约对齐 mihomo-cli.sh; 显示风格用 indicatif + tabled 美化 (用户选定)
+// 行为契约对齐 mihomo-cli.sh; 显示风格用 indicatif + 自研 unicode-width 表格 (无第三方 tabled)
 #![allow(dead_code)]
 
 use crate::api::{Client, Config};
@@ -95,7 +95,7 @@ pub async fn cmd_ping(client: &Client, n: usize, filter: Option<&str>) {
     spinner.enable_steady_tick(std::time::Duration::from_millis(100));
     spinner.set_message(format!("{}(等待结果...){}", c.dim, c.reset));
 
-    // 完成顺序缓存 (直接作为墙的内容, 不再排序)
+    // 完成顺序缓存: 仅用于实时墙的流式增长 (最终展示前再按延迟排序)
     let mut done: Vec<(i64, String)> = Vec::with_capacity(total);
     let spinner_ref = &spinner;
     latency_stream(client, nodes, client.cfg.parallel, |r: DelayResult| {
@@ -105,21 +105,24 @@ pub async fn cmd_ping(client: &Client, n: usize, filter: Option<&str>) {
         spinner_ref.set_message(wall);
         spinner_ref.inc(1);
     }).await;
-    // finish (而非 finish_and_clear) 保留最后一帧墙在终端
-    spinner.finish();
+    // 实时墙按完成顺序增长 (流式反馈); 最终改用 finish_and_clear 清掉, 再打印按延迟排序的干净墙
+    spinner.finish_and_clear();
 
-    // 统计
+    // 统计 (基于全量结果, 不受 N 截断影响)
     let ok = done.iter().filter(|(d, _)| *d < FAIL_MS).count();
     let fail = done.len() - ok;
 
-    // 最终: 若实际完成数 > n, 只保留前 n 个 (完成顺序) 重绘一次墙; 否则墙上已是全部结果
-    if done.len() > n {
-        let top: Vec<(i64, String)> = done.into_iter().take(n).collect();
-        println!();
-        println!("{}{}★ 延迟热力图{}  {}显示前 {} / {} (按完成顺序, 按延迟分色: 绿<200 · 青<500 · 黄<1000 · 红≥1000 · 暗血红失败){}",
-                 c.bold, c.magenta, c.reset, c.dim, top.len(), total, c.reset);
-        println!("{}", crate::ui::render_heat_wall(c, &top, term_w, brick_w));
-    }
+    // 按延迟升序排序 (失败节点 FAIL_MS 最大自然靠后), 取前 N 展示 (与 speed/best 口径一致)
+    done.sort_by_key(|(d, _)| *d);
+    let show: Vec<(i64, String)> = if done.len() > n {
+        done.into_iter().take(n).collect()
+    } else {
+        done
+    };
+    println!();
+    println!("{}{}★ 延迟热力图{}  {}显示前 {} / {} (按延迟排序: 绿<200 · 青<500 · 黄<1000 · 红≥1000 · 暗血红失败){}",
+             c.bold, c.magenta, c.reset, c.dim, show.len(), total, c.reset);
+    println!("{}", crate::ui::render_heat_wall(c, &show, term_w, brick_w));
     println!("{}共{} {}{}{} 节点可达,{} {}{}{} 失败{}",
              c.dim, c.reset, c.green, ok, c.dim, c.reset, c.red, fail, c.dim, c.reset);
 }
@@ -172,7 +175,7 @@ async fn pick_candidates(client: &Client, n: usize, filter: Option<&str>) -> Vec
 /// 对齐: 切换后 sleep 500ms (审核钉死项 8), 延迟用 node_delay 单点重查 (审核建议 B)
 async fn measure_one(client: &Client, name: &str, rank: usize, colors: &Colors) -> (SpeedDetail, String) {
     let c = colors;
-    let _ = client.group_set(name).await.unwrap_or_else(|e| die(&e));
+    client.group_set(name).await.unwrap_or_else(|e| die(&e));
     tokio::time::sleep(std::time::Duration::from_millis(500)).await; // 切换后 sleep 500ms
 
     // 10 砖块进度墙: target 字节均分 10 段, 每块显示该 1MB 区间的速度 (Mbps), 按速度分色
@@ -372,7 +375,7 @@ pub async fn cmd_select(client: &Client, want: &str) {
     let nodes = client.get_nodes().await.unwrap_or_else(|e| die(&e));
     // 精确匹配
     if nodes.iter().any(|n| n == want) {
-        let _ = client.group_set(want).await.unwrap_or_else(|e| die(&e));
+        client.group_set(want).await.unwrap_or_else(|e| die(&e));
         println!("{}✓ 已选择: {}{}", c.green, want, c.reset);
         return;
     }
@@ -383,7 +386,7 @@ pub async fn cmd_select(client: &Client, want: &str) {
         0 => die(&format!("未找到节点: {}", want)),
         1 => {
             let name = m[0];
-            let _ = client.group_set(name).await.unwrap_or_else(|e| die(&e));
+            client.group_set(name).await.unwrap_or_else(|e| die(&e));
             println!("{}✓ 已选择: {}{}", c.green, name, c.reset);
         }
         _ => {
@@ -469,7 +472,7 @@ pub async fn cmd_pick(client: &Client, do_ping: bool) {
     }
     // 解析节点名: 有 '|' 取首个 | 之后; 无则整行即名 (审核钉死项)
     let name = line.split_once('|').map(|(_, n)| n).unwrap_or(&line).to_string();
-    let _ = client.group_set(&name).await.unwrap_or_else(|e| die(&e));
+    client.group_set(&name).await.unwrap_or_else(|e| die(&e));
     println!("{}✓ 已切换到: {}{}", c.green, name, c.reset);
 }
 
@@ -518,7 +521,7 @@ async fn pull_one(client: &Client, cfg: &Config, name: &str, url: Option<&str>) 
     };
     let status = resp.status();
     if !status.is_success() {
-        die(&format!("订阅拉取失败 (HTTP {}): {}", status.as_u16(), url));
+        die(&format!("订阅拉取失败 (HTTP {}): {}", status.as_u16(), mask_url(&url)));
     }
     let body = resp.text().await.unwrap_or_default();
 
@@ -688,12 +691,12 @@ fn list_subs(cfg: &Config) -> Vec<String> {
     let mut names = Vec::new();
     if let Ok(entries) = std::fs::read_dir(&cfg.subs_dir) {
         for e in entries.flatten() {
-            if e.file_type().map(|t| t.is_dir()).unwrap_or(false) {
-                if let Some(n) = e.file_name().to_str() {
-                    if !n.starts_with('.') {
-                        names.push(n.to_string());
-                    }
-                }
+            let name = e.file_name();
+            if e.file_type().map(|t| t.is_dir()).unwrap_or(false)
+                && let Some(n) = name.to_str()
+                && !n.starts_with('.')
+            {
+                names.push(n.to_string());
             }
         }
     }
@@ -754,7 +757,7 @@ pub async fn cmd_sub(client: &Client, cfg: &Config, action: &str, name: Option<&
             if std::path::Path::new(&sub_dir(cfg, name)).exists() {
                 die(&format!("订阅 [{}] 已存在。删除: cone-cli sub rm {}", name, name));
             }
-            std::fs::create_dir_all(&sub_dir(cfg, name))
+            std::fs::create_dir_all(sub_dir(cfg, name))
                 .unwrap_or_else(|e| die(&format!("无法创建订阅目录: {e}")));
             // 先写 suburl, 让 pull_one 能读到 (pull_one 也接受 url 参数, 这里双保险)
             std::fs::write(format!("{}/suburl", sub_dir(cfg, name)), url)
@@ -996,6 +999,14 @@ fn strip_url_scheme(url: &str) -> String {
     url.trim_start_matches("https://")
         .trim_start_matches("http://")
         .to_string()
+}
+
+/// 脱敏订阅 URL: 隐藏 query (订阅 token 常在 query 里), 保留 scheme/host/path 便于排查
+fn mask_url(url: &str) -> String {
+    match url.split_once('?') {
+        Some((before, _)) => format!("{before}?***"),
+        None => url.to_string(),
+    }
 }
 
 /// 确保 config.yaml 含有顶层 external-controller 行, 值与 cfg.api 一致

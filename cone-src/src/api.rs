@@ -171,7 +171,7 @@ impl Client {
     }
 
     // ============================== 节点列表 ==============================
-    /// 非节点类型 (组/特殊) — 照抄 bash 第 102 行 (含其末尾 RejectDrop 重复 bug, 1:1 对齐)
+    /// 非节点类型 (组/特殊) — 照抄 bash 第 102 行 (已清理 bash 遗留的 RejectDrop 重复)
     const EXCLUDE_TYPES: &'static [&'static str] = &[
         "Direct",
         "Reject",
@@ -181,7 +181,6 @@ impl Client {
         "PassRule",
         "Compatible",
         "Dns",
-        "RejectDrop", // bash 既有 bug, 原样保留
     ];
 
     /// 所有真实节点: 返回 Vec<(name, type)>
@@ -224,19 +223,11 @@ impl Client {
 
     /// 单节点延迟: 返回 ms 字符串 (失败返回 "-", 对齐 bash 第 117-120 行)
     pub async fn node_delay(&self, name: &str) -> String {
-        let path = format!(
-            "/proxies/{}/delay?url={}&timeout={}",
-            urlenc(name),
-            urlenc(&self.cfg.test_url),
-            self.cfg.delay_timeout
-        );
-        match self.get(&path).await {
-            Ok(v) => v
-                .get("delay")
-                .and_then(|d| d.as_i64())
-                .map(|d| d.to_string())
-                .unwrap_or_else(|| "-".to_string()),
-            Err(_) => "-".to_string(),
+        let ms = self.node_delay_ms(name).await;
+        if ms >= crate::ui::FAIL_MS {
+            "-".to_string()
+        } else {
+            ms.to_string()
         }
     }
 
@@ -317,9 +308,11 @@ mod tests {
     }
 
     #[test]
-    fn exclude_types_has_duplicate_rejectdrop_bug() {
-        // bash 既有 bug: RejectDrop 重复出现两次, 1:1 原样保留
-        let count = Client::EXCLUDE_TYPES.iter().filter(|&&t| t == "RejectDrop").count();
-        assert_eq!(count, 2, "应保留 bash 的 RejectDrop 重复 bug");
+    fn exclude_types_are_unique() {
+        // 已清理 bash 遗留的 RejectDrop 重复: 所有条目应唯一
+        let mut sorted = Client::EXCLUDE_TYPES.to_vec();
+        sorted.sort_unstable();
+        let dup_count = sorted.windows(2).filter(|w| w[0] == w[1]).count();
+        assert_eq!(dup_count, 0, "EXCLUDE_TYPES 不应有重复项: {:?}", sorted);
     }
 }

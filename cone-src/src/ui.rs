@@ -346,6 +346,7 @@ fn render_speed_brick(c: &Colors, mbps: i64, width: usize) -> String {
 /// 渲染下载测速砖块条 (固定 10 块, 每块代表 target/10 字节)
 /// - seg_mbps[i] = Some(mbps): 第 i 段已完成, 显示该段速度, 按速度分档背景色
 /// - 其余段 (含进行中、未开始): 灰色占位 (固定宽度, 保持对齐)
+///
 /// 返回不带换行的单行字符串
 pub fn render_speed_bricks(c: &Colors, seg_mbps: &[Option<i64>], brick_w: usize) -> String {
     let mut s = String::new();
